@@ -1,0 +1,198 @@
+@import "tailwindcss";
+@import "@nuxt/ui";
+
+:root {
+  --ui-radius: 0.375rem;
+}
+
+html,
+body,
+#__nuxt {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  margin: 0;
+  background: var(--ui-bg);
+  color: var(--ui-text);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+.app-shell {
+  width: 100%;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--ui-bg);
+  color: var(--ui-text);
+}
+
+.app-frame {
+  background: var(--ui-bg);
+}
+
+.sidebar,
+.panel {
+  background: var(--ui-bg-elevated);
+}
+
+.panel {
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius);
+}
+
+.profile-row,
+.plugin-row,
+.player-row,
+.mod-card,
+.access-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius);
+  background: var(--ui-bg);
+  padding: 0.75rem;
+  color: var(--ui-text);
+  text-align: left;
+}
+
+.mod-card {
+  min-width: 0;
+  align-items: stretch;
+  flex-direction: column;
+  justify-content: flex-start;
+  overflow: hidden;
+}
+
+.profile-row.active {
+  border-color: var(--ui-primary);
+  background: color-mix(in srgb, var(--ui-primary) 11%, var(--ui-bg));
+}
+
+.empty-panel {
+  display: grid;
+  min-height: 28rem;
+  place-items: center;
+  border: 1px dashed var(--ui-border);
+  border-radius: var(--ui-radius);
+  background: var(--ui-bg-elevated);
+  text-align: center;
+}
+
+.empty-note {
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius);
+  background: var(--ui-bg);
+  padding: 0.75rem;
+  color: var(--ui-text-muted);
+  font-size: 0.875rem;
+}
+
+.metric-label {
+  color: var(--ui-text-muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+}
+
+.metric-value {
+  margin-top: 0.5rem;
+  color: var(--ui-text-highlighted);
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.75rem;
+}
+
+.settings-field {
+  min-width: 0;
+}
+
+.log-line {
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.log-segment {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.control-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.control-row > :first-child {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.control-row > :not(:first-child) {
+  flex: 0 0 auto;
+}
+
+.check-row {
+  display: flex;
+  min-height: 2.5rem;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius);
+  padding: 0 0.75rem;
+  color: var(--ui-text);
+  font-size: 0.875rem;
+}
+
+.avatar {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border-radius: var(--ui-radius);
+  background: color-mix(in srgb, var(--ui-primary) 18%, transparent);
+  color: var(--ui-primary);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.settings-popover {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  z-index: 40;
+  width: 15rem;
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius);
+  background: var(--ui-bg-elevated);
+  box-shadow: 0 18px 44px color-mix(in srgb, black 18%, transparent);
+  padding: 0.75rem;
+}
+
+.advanced-config {
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius);
+  background: var(--ui-bg);
+  padding: 0.75rem;
+}
+
+.w-full :is(input, select, textarea) {
+  width: 100%;
+}

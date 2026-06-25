@@ -1,0 +1,734 @@
+import { invoke } from '@tauri-apps/api/core'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { useColorMode, useToast } from '#imports'
+import { computed, inject, onBeforeUnmount, onMounted, provide, reactive, ref, watch, type InjectionKey } from 'vue'
+import { stripConsoleCodes } from '~/utils/consoleLog'
+import {
+  cloneProfile,
+  defaultProperties,
+  emptyAccessLists,
+  gamemodeOptions,
+  mockStatus,
+  playerActionOptions,
+  serverKinds,
+  statusColor,
+  statusLabel,
+  tabs,
+  themeOptions,
+  type AccessKind,
+  type AccessLists,
+  type BackupInfo,
+  type InstalledPlugin,
+  type JavaRuntime,
+  type MinecraftIdentity,
+  type MainTab,
+  type ModrinthProject,
+  type PlayerAction,
+  type PluginFile,
+  type ServerConfigBundle,
+  type ServerKind,
+  type ServerLogEvent,
+  type ServerPlan,
+  type ServerProfile,
+  type ServerStatus,
+  type ServerVersion,
+  type ThemeMode
+} from '~/types/launcher'
+
+const mockVersions: Record<ServerKind, ServerVersion[]> = {
+  paper: ['1.21.11', '1.21.10', '1.21.8', '1.20.6'].map((id) => ({ id, label: `Paper ${id}`, kind: 'release' })),
+  folia: ['1.21.11', '1.21.8', '1.21.6'].map((id) => ({ id, label: `Folia ${id}`, kind: 'release' })),
+  purpur: ['1.21.11', '1.21.10', '1.21.8', '1.20.6'].map((id) => ({ id, label: `Purpur ${id}`, kind: 'release' })),
+  vanilla: ['1.21.11', '1.21.10', '1.21.8', '1.20.6'].map((id) => ({ id, label: `Vanilla ${id}`, kind: 'release' }))
+}
+
+const mockProfiles: ServerProfile[] = []
+let mockAccess = emptyAccessLists()
+let mockRuntimeStatus = mockStatus()
+
+const isTauri = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+
+const call = async <T,>(command: string, args?: Record<string, unknown>) => {
+  if (isTauri()) return invoke<T>(command, args)
+
+  await new Promise((resolve) => setTimeout(resolve, 120))
+  if (command === 'list_server_versions') return mockVersions[(args?.kind as ServerKind) || 'paper'] as T
+  if (command === 'list_profiles') return mockProfiles as T
+  if (command === 'choose_server_directory') return '/Users/example/Minecraft Servers/New Server' as T
+  if (command === 'scan_java_versions') return [] as T
+  if (command === 'lookup_minecraft_profile') {
+    const name = String(args?.name || 'Player')
+    return { name, uuid: '00000000-0000-0000-0000-000000000000' } as T
+  }
+  if (command === 'read_access_lists') return mockAccess as T
+  if (command === 'save_access_lists') {
+    mockAccess = args?.lists as AccessLists
+    return mockAccess as T
+  }
+  if (command === 'create_profile') {
+    const input = args?.input as Partial<ServerProfile> & { serverDir?: string }
+    const profile: ServerProfile = {
+      id: `profile-${Date.now()}`,
+      name: input.name || `${input.kind || 'paper'} ${input.minecraftVersion || '1.21.11'}`,
+      kind: input.kind || 'paper',
+      minecraftVersion: input.minecraftVersion || '1.21.11',
+      serverDir: input.serverDir || '/Users/example/Minecraft Servers/New Server',
+      memoryMb: input.memoryMb || 4096,
+      javaPath: null,
+      lastUsed: null,
+      settings: defaultProperties()
+    }
+    mockProfiles.push(profile)
+    return profile as T
+  }
+  if (command === 'update_profile') {
+    const profile = args?.profile as ServerProfile
+    const index = mockProfiles.findIndex((item) => item.id === profile.id)
+    if (index >= 0) mockProfiles[index] = cloneProfile(profile)
+    return profile as T
+  }
+  if (command === 'resolve_server_plan') {
+    const profile = mockProfiles.find((item) => item.id === args?.profileId)
+    return {
+      profileId: profile?.id || '',
+      version: profile?.minecraftVersion || '1.21.11',
+      serverKind: profile?.kind || 'paper',
+      requiredJava: 21,
+      javaComponent: 'java-runtime-delta',
+      java: null,
+      serverAvailable: true,
+      serverNote: '브라우저 미리보기 모드입니다.'
+    } as T
+  }
+  if (command === 'read_server_config') {
+    return {
+      properties: defaultProperties(),
+      propertiesRaw: '',
+      configFiles: ['bukkit.yml', 'spigot.yml', 'paper.yml', 'config/paper-global.yml'].map((relativePath) => ({
+        name: relativePath.split('/').pop() || relativePath,
+        relativePath,
+        exists: false,
+        editable: false,
+        content: ''
+      })),
+      configFields: [],
+      jsonLists: ['ops.json', 'whitelist.json', 'banned-players.json'].map((name) => ({ name, exists: false, content: '[]\n' })),
+      restartRequired: false
+    } as T
+  }
+  if (command === 'save_server_config') return args?.bundle as T
+  if (command === 'start_server') {
+    mockRuntimeStatus = {
+      ...mockRuntimeStatus,
+      running: true,
+      status: 'running',
+      currentProfileId: args?.profileId as string,
+      logs: ['Starting mock server', 'Done (1.000s)! For help, type "help"']
+    }
+    return { ...mockRuntimeStatus, logs: [...mockRuntimeStatus.logs] } as T
+  }
+  if (command === 'stop_server') {
+    mockRuntimeStatus.logs.push('> stop')
+    mockRuntimeStatus = { ...mockRuntimeStatus, status: 'stopping' }
+    return { ...mockRuntimeStatus, logs: [...mockRuntimeStatus.logs] } as T
+  }
+  if (command === 'send_server_command') {
+    const serverCommand = String(args?.command || '')
+    mockRuntimeStatus.logs.push(`> ${serverCommand}`)
+    return { ...mockRuntimeStatus, logs: [...mockRuntimeStatus.logs] } as T
+  }
+  if (command === 'server_status') return { ...mockRuntimeStatus, logs: [...mockRuntimeStatus.logs] } as T
+  if (command === 'list_plugins' || command === 'search_modrinth') return [] as T
+  if (command === 'set_plugin_enabled') return [] as T
+  if (command === 'install_modrinth_plugin') return { filename: 'plugin.jar' } as T
+  if (command === 'create_backup') return { filename: 'backup.zip', path: '/tmp/backup.zip', size: 0 } as T
+  if (command === 'open_server_path') return undefined as T
+  throw new Error('Tauri 앱에서 사용할 수 있는 기능입니다.')
+}
+
+export const useLauncherState = () => {
+  const colorMode = useColorMode() as unknown as { preference: ThemeMode }
+  const toast = useToast()
+  const profiles = ref<ServerProfile[]>([])
+  const selectedProfileId = ref('')
+  const profileDraft = ref<ServerProfile | null>(null)
+  const versions = ref<ServerVersion[]>([])
+  const createVersions = ref<ServerVersion[]>([])
+  const javaVersions = ref<JavaRuntime[]>([])
+  const plan = ref<ServerPlan | null>(null)
+  const status = ref<ServerStatus>(mockStatus())
+  const config = ref<ServerConfigBundle | null>(null)
+  const accessLists = ref<AccessLists>(emptyAccessLists())
+  const plugins = ref<PluginFile[]>([])
+  const modrinthProjects = ref<ModrinthProject[]>([])
+  const mainTab = ref<MainTab>('console')
+  const appSettingsOpen = ref(false)
+  const newProfileOpen = ref(false)
+  const versionLoading = ref(false)
+  const createVersionLoading = ref(false)
+  const logQuery = ref('')
+  const commandText = ref('')
+  const pluginQuery = ref('')
+  const loading = ref('')
+  const backupInfo = ref<BackupInfo | null>(null)
+  const playerActionOpen = ref(false)
+  const selectedPlayerName = ref('')
+  const playerAction = ref<PlayerAction>('kick')
+  const playerActionReason = ref('')
+  const playerActionGamemode = ref('survival')
+  const accessName = reactive<Record<AccessKind, string>>({ ops: '', whitelist: '', bannedPlayers: '' })
+  const banReason = ref('Banned by an operator.')
+  const accessRawOpen = reactive<Record<AccessKind, boolean>>({ ops: false, whitelist: false, bannedPlayers: false })
+  const defaultNewProfile = () => ({
+    name: '',
+    kind: 'paper' as ServerKind,
+    minecraftVersion: '',
+    serverDir: '',
+    memoryMb: 4096
+  })
+  const newProfile = ref(defaultNewProfile())
+
+  let pollTimer: ReturnType<typeof setInterval> | undefined
+  const unlisteners: UnlistenFn[] = []
+  let versionRequestId = 0
+  let createVersionRequestId = 0
+
+  const selectedProfile = computed(() => profiles.value.find((profile) => profile.id === selectedProfileId.value) || null)
+  const activeProfileRunning = computed(() => status.value.running && status.value.currentProfileId === selectedProfileId.value)
+  const anyServerRunning = computed(() => status.value.running)
+  const canUsePlugins = computed(() => !!selectedProfile.value && selectedProfile.value.kind !== 'vanilla')
+  const filteredLogs = computed(() => {
+    const query = logQuery.value.trim().toLowerCase()
+    return status.value.logs.filter((line) => !query || stripConsoleCodes(line).toLowerCase().includes(query))
+  })
+  const versionOptions = computed(() => versions.value.map((version) => ({ label: version.id, value: version.id })))
+  const createVersionOptions = computed(() => createVersions.value.map((version) => ({ label: version.id, value: version.id })))
+  const profileKindLabel = computed(() => selectedProfile.value ? serverKinds.find((kind) => kind.value === selectedProfile.value?.kind)?.label : '-')
+  const selectedJava = computed(() => javaVersions.value.find((java) => java.path === profileDraft.value?.javaPath) || null)
+  const selectedJavaPath = computed(() => selectedJava.value?.path || profileDraft.value?.javaPath || '자동 선택')
+  const whitelistEnabled = computed(() => config.value?.properties.whiteList === true)
+  const profileRuntimeStatus = (profile: ServerProfile) => status.value.currentProfileId === profile.id ? status.value.status : 'stopped'
+  const formatJson = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`
+  const validPlayerName = (name: string) => /^[A-Za-z0-9_]{1,16}$/.test(name)
+
+  const friendlyError = (error: unknown) => {
+    const text = error instanceof Error ? error.message : String(error)
+    if (text.includes('404') || text.includes('Not Found')) return '선택한 서버 구현체가 해당 Minecraft 버전을 지원하지 않습니다.'
+    return text
+  }
+
+  const notifySuccess = (title: string, description?: string) => {
+    toast.add({ title, description, color: 'success', icon: 'i-lucide-check' })
+  }
+
+  const notifyError = (title: string, description?: string) => {
+    toast.add({ title, description, color: 'error', icon: 'i-lucide-circle-alert' })
+  }
+
+  const setError = (error: unknown) => {
+    notifyError('작업 실패', friendlyError(error))
+  }
+
+  const pushRuntimeLog = (line: string) => {
+    if (status.value.logs.at(-1) !== line) status.value.logs.push(line)
+    if (status.value.logs.length > 1000) status.value.logs.splice(0, status.value.logs.length - 1000)
+  }
+
+  const applyStatus = (next: ServerStatus) => {
+    const sameRuntime = next.currentProfileId === status.value.currentProfileId && next.status === status.value.status
+    const logs = sameRuntime && status.value.logs.length >= next.logs.length ? [...status.value.logs] : [...next.logs]
+    status.value = { ...next, logs }
+  }
+
+  const runTask = async <T,>(key: string, task: () => Promise<T>) => {
+    loading.value = key
+    try {
+      return await task()
+    } catch (error) {
+      setError(error)
+    } finally {
+      loading.value = ''
+    }
+  }
+
+  const loadVersions = async (kind: ServerKind, forCreate = false, clearSelection = false) => {
+    const requestId = forCreate ? ++createVersionRequestId : ++versionRequestId
+    const previousVersion = profileDraft.value?.minecraftVersion || ''
+
+    if (forCreate) {
+      createVersionLoading.value = true
+      createVersions.value = []
+      newProfile.value.minecraftVersion = ''
+    } else {
+      versionLoading.value = true
+      if (clearSelection && profileDraft.value?.kind === kind) {
+        versions.value = []
+        profileDraft.value.minecraftVersion = ''
+      }
+    }
+
+    try {
+      const result = await call<ServerVersion[]>('list_server_versions', { kind })
+      if (forCreate) {
+        if (requestId !== createVersionRequestId || newProfile.value.kind !== kind) return
+        createVersions.value = result
+        newProfile.value.minecraftVersion = result[0]?.id || ''
+        return
+      }
+
+      if (requestId !== versionRequestId || profileDraft.value?.kind !== kind) return
+      versions.value = result
+      if (profileDraft.value) {
+        profileDraft.value.minecraftVersion = previousVersion && result.some((version) => version.id === previousVersion)
+          ? previousVersion
+          : result[0]?.id || ''
+      }
+    } finally {
+      if (forCreate) {
+        if (requestId === createVersionRequestId && newProfile.value.kind === kind) createVersionLoading.value = false
+      } else if (requestId === versionRequestId && profileDraft.value?.kind === kind) {
+        versionLoading.value = false
+      }
+    }
+  }
+
+  const refreshProfiles = async () => {
+    profiles.value = await call<ServerProfile[]>('list_profiles')
+    if (!selectedProfileId.value || !profiles.value.some((profile) => profile.id === selectedProfileId.value)) {
+      selectedProfileId.value = profiles.value[0]?.id || ''
+    }
+  }
+
+  const refreshStatus = async () => {
+    const previousStatus = status.value.status
+    const previousProfileId = status.value.currentProfileId
+    applyStatus(await call<ServerStatus>('server_status'))
+    if (selectedProfile.value && (previousStatus !== status.value.status || previousProfileId !== status.value.currentProfileId)) {
+      await refreshConfig()
+    }
+  }
+
+  const refreshPlan = async () => {
+    plan.value = selectedProfile.value ? await call<ServerPlan>('resolve_server_plan', { profileId: selectedProfile.value.id }) : null
+  }
+
+  const refreshConfig = async () => {
+    config.value = selectedProfile.value ? await call<ServerConfigBundle>('read_server_config', { profileId: selectedProfile.value.id }) : null
+  }
+
+  const refreshAccessLists = async () => {
+    accessLists.value = selectedProfile.value
+      ? await call<AccessLists>('read_access_lists', { profileId: selectedProfile.value.id })
+      : emptyAccessLists()
+  }
+
+  const refreshPlugins = async () => {
+    const profile = selectedProfile.value
+    if (!profile || profile.kind === 'vanilla') {
+      plugins.value = []
+      modrinthProjects.value = []
+      return
+    }
+    plugins.value = await call<PluginFile[]>('list_plugins', { profileId: profile.id })
+  }
+
+  const refreshProfileData = async () => {
+    const profile = selectedProfile.value
+    if (!profile) {
+      profileDraft.value = null
+      config.value = null
+      plugins.value = []
+      accessLists.value = emptyAccessLists()
+      return
+    }
+
+    profileDraft.value = cloneProfile(profile)
+    await loadVersions(profile.kind)
+    await Promise.all([refreshPlan(), refreshConfig(), refreshAccessLists(), refreshPlugins()])
+  }
+
+  const chooseDirectory = async (target: 'create' | 'profile') => {
+    const path = await call<string | null>('choose_server_directory')
+    if (!path) return
+    if (target === 'create') newProfile.value.serverDir = path
+    if (target === 'profile' && profileDraft.value) profileDraft.value.serverDir = path
+  }
+
+  const resetNewProfile = () => {
+    newProfile.value = defaultNewProfile()
+  }
+
+  const openNewProfileModal = () => {
+    resetNewProfile()
+    newProfileOpen.value = true
+    loadVersions(newProfile.value.kind, true).catch(setError)
+  }
+
+  const closeNewProfileModal = () => {
+    newProfileOpen.value = false
+  }
+
+  const createProfile = async () => runTask('create-profile', async () => {
+    if (!newProfile.value.minecraftVersion) await loadVersions(newProfile.value.kind, true)
+    if (!newProfile.value.minecraftVersion) throw new Error('선택 가능한 Minecraft 버전이 없습니다.')
+    const profile = await call<ServerProfile>('create_profile', { input: newProfile.value })
+    profiles.value = await call<ServerProfile[]>('list_profiles')
+    selectedProfileId.value = profile.id
+    closeNewProfileModal()
+    resetNewProfile()
+    notifySuccess('프로필을 만들었습니다.')
+  })
+
+  const saveProfile = async () => runTask('save-profile', async () => {
+    if (!profileDraft.value) return
+    const saved = await call<ServerProfile>('update_profile', { profile: profileDraft.value })
+    const index = profiles.value.findIndex((profile) => profile.id === saved.id)
+    if (index >= 0) profiles.value[index] = cloneProfile(saved)
+    notifySuccess('프로필 설정을 저장했습니다.')
+    await refreshProfileData()
+  })
+
+  const saveConfig = async () => runTask('save-config', async () => {
+    if (!selectedProfile.value || !config.value) return
+    config.value = await call<ServerConfigBundle>('save_server_config', {
+      profileId: selectedProfile.value.id,
+      bundle: config.value
+    })
+    await refreshProfiles()
+    notifySuccess('서버 설정을 저장했습니다.', '일부 값은 재시작 후 적용됩니다.')
+  })
+
+  const toggleServer = async () => runTask('server', async () => {
+    if (!selectedProfile.value) return
+    applyStatus(activeProfileRunning.value
+      ? await call<ServerStatus>('stop_server')
+      : await call<ServerStatus>('start_server', { profileId: selectedProfile.value.id }))
+    await refreshProfileData()
+  })
+
+  const sendCommand = async (command = commandText.value) => runTask('command', async () => {
+    const trimmed = command.trim()
+    if (!trimmed) return
+    commandText.value = ''
+    applyStatus(await call<ServerStatus>('send_server_command', { command: trimmed }))
+  })
+
+  const refreshPlayers = async () => runTask('players-refresh', async () => {
+    if (!activeProfileRunning.value) throw new Error('실행 중인 서버에서만 플레이어 목록을 갱신할 수 있습니다.')
+    applyStatus(await call<ServerStatus>('send_server_command', { command: 'list' }))
+  })
+
+  const openPlayerAction = (player: string) => {
+    selectedPlayerName.value = player
+    playerAction.value = 'kick'
+    playerActionReason.value = ''
+    playerActionGamemode.value = 'survival'
+    playerActionOpen.value = true
+  }
+
+  const closePlayerAction = () => {
+    playerActionOpen.value = false
+  }
+
+  const playerActionCommand = () => {
+    const player = selectedPlayerName.value.trim()
+    if (!validPlayerName(player)) throw new Error('올바른 Minecraft 닉네임이 아닙니다.')
+
+    const reason = playerActionReason.value.trim().replace(/\s+/g, ' ')
+    if (playerAction.value === 'kick') return `kick ${player} ${reason || 'Kicked by an operator.'}`
+    if (playerAction.value === 'ban') return `ban ${player} ${reason || 'Banned by an operator.'}`
+    if (playerAction.value === 'pardon') return `pardon ${player}`
+    if (playerAction.value === 'op') return `op ${player}`
+    if (playerAction.value === 'deop') return `deop ${player}`
+    if (playerAction.value === 'whitelist-add') return `whitelist add ${player}`
+    if (playerAction.value === 'whitelist-remove') return `whitelist remove ${player}`
+    return `gamemode ${playerActionGamemode.value} ${player}`
+  }
+
+  const runPlayerAction = async () => runTask('player-action', async () => {
+    if (!activeProfileRunning.value) throw new Error('실행 중인 서버에서만 플레이어 명령을 전송할 수 있습니다.')
+
+    const action = playerAction.value
+    const command = playerActionCommand()
+    applyStatus(await call<ServerStatus>('send_server_command', { command }))
+
+    if (['kick', 'ban', 'pardon'].includes(action)) {
+      applyStatus(await call<ServerStatus>('send_server_command', { command: 'list' }))
+    }
+
+    if (['op', 'deop', 'ban', 'pardon', 'whitelist-add', 'whitelist-remove'].includes(action)) {
+      refreshAccessLists().catch(() => {})
+    }
+
+    closePlayerAction()
+    notifySuccess('플레이어 명령을 전송했습니다.', `> ${command}`)
+  })
+
+  const searchPlugins = async () => runTask('search-plugins', async () => {
+    if (!selectedProfile.value || selectedProfile.value.kind === 'vanilla') return
+    modrinthProjects.value = await call<ModrinthProject[]>('search_modrinth', {
+      query: pluginQuery.value,
+      gameVersion: selectedProfile.value.minecraftVersion,
+      loader: selectedProfile.value.kind
+    })
+  })
+
+  const installPlugin = async (project: ModrinthProject) => runTask(`install-${project.project_id}`, async () => {
+    if (!selectedProfile.value) return
+    const installed = await call<InstalledPlugin>('install_modrinth_plugin', {
+      profileId: selectedProfile.value.id,
+      projectId: project.project_id,
+      title: project.title,
+      loader: selectedProfile.value.kind
+    })
+    notifySuccess('플러그인을 설치했습니다.', `${installed.filename} - 서버 재시작 후 로드됩니다.`)
+    await refreshPlugins()
+  })
+
+  const setPluginEnabled = async (plugin: PluginFile, enabled: boolean) => runTask(`plugin-${plugin.filename}`, async () => {
+    if (!selectedProfile.value) return
+    plugins.value = await call<PluginFile[]>('set_plugin_enabled', {
+      profileId: selectedProfile.value.id,
+      filename: plugin.filename,
+      enabled
+    })
+    notifySuccess(
+      enabled ? '플러그인을 활성화했습니다.' : '플러그인을 비활성화했습니다.',
+      '서버 재시작 후 적용됩니다.'
+    )
+  })
+
+  const accessPayload = () => ({
+    ...accessLists.value,
+    rawOps: accessRawOpen.ops ? accessLists.value.rawOps : formatJson(accessLists.value.ops),
+    rawWhitelist: accessRawOpen.whitelist ? accessLists.value.rawWhitelist : formatJson(accessLists.value.whitelist),
+    rawBannedPlayers: accessRawOpen.bannedPlayers ? accessLists.value.rawBannedPlayers : formatJson(accessLists.value.bannedPlayers)
+  })
+
+  const addAccessEntry = async (kind: AccessKind) => runTask(`access-${kind}`, async () => {
+    if (!selectedProfile.value) return
+    const name = accessName[kind].trim()
+    if (!name) throw new Error('Minecraft 닉네임을 입력해 주세요.')
+    const identity = await call<MinecraftIdentity>('lookup_minecraft_profile', { name })
+
+    if (kind === 'ops') {
+      if (!accessLists.value.ops.some((entry) => entry.uuid === identity.uuid)) {
+        accessLists.value.ops.push({ uuid: identity.uuid, name: identity.name, level: 4, bypassesPlayerLimit: false })
+      }
+    } else if (kind === 'whitelist') {
+      if (!accessLists.value.whitelist.some((entry) => entry.uuid === identity.uuid)) {
+        accessLists.value.whitelist.push({ uuid: identity.uuid, name: identity.name })
+      }
+    } else if (!accessLists.value.bannedPlayers.some((entry) => entry.uuid === identity.uuid)) {
+      accessLists.value.bannedPlayers.push({
+        uuid: identity.uuid,
+        name: identity.name,
+        created: new Date().toISOString(),
+        source: 'Minehub Server Launcher',
+        expires: 'forever',
+        reason: banReason.value.trim() || 'Banned by an operator.'
+      })
+    }
+
+    accessName[kind] = ''
+  })
+
+  const removeAccessEntry = (kind: AccessKind, index: number) => {
+    if (kind === 'ops') accessLists.value.ops.splice(index, 1)
+    if (kind === 'whitelist') accessLists.value.whitelist.splice(index, 1)
+    if (kind === 'bannedPlayers') accessLists.value.bannedPlayers.splice(index, 1)
+  }
+
+  const saveAccessLists = async () => runTask('save-access', async () => {
+    if (!selectedProfile.value) return
+    const shouldApplyNow = activeProfileRunning.value
+    accessLists.value = await call<AccessLists>('save_access_lists', {
+      profileId: selectedProfile.value.id,
+      lists: accessPayload()
+    })
+    notifySuccess(
+      '권한/차단 목록을 저장했습니다.',
+      shouldApplyNow ? '실행 중인 서버에 명령으로 반영했습니다.' : '서버 다음 실행 시 적용됩니다.'
+    )
+  })
+
+  const setWhitelistEnabled = async (enabled: boolean) => runTask('whitelist-toggle', async () => {
+    if (!selectedProfile.value) return
+    if (!config.value) await refreshConfig()
+    if (!config.value) throw new Error('서버 설정을 불러오지 못했습니다.')
+
+    const shouldApplyNow = activeProfileRunning.value
+    config.value.properties.whiteList = enabled
+    config.value = await call<ServerConfigBundle>('save_server_config', {
+      profileId: selectedProfile.value.id,
+      bundle: config.value
+    })
+    await refreshProfiles()
+
+    if (shouldApplyNow) {
+      applyStatus(await call<ServerStatus>('send_server_command', {
+        command: enabled ? 'whitelist on' : 'whitelist off'
+      }))
+    }
+
+    notifySuccess(
+      enabled ? '화이트리스트를 켰습니다.' : '화이트리스트를 껐습니다.',
+      shouldApplyNow ? '실행 중인 서버에 즉시 반영했습니다.' : '서버 다음 실행 시 적용됩니다.'
+    )
+  })
+
+  const createBackup = async () => runTask('backup', async () => {
+    if (!selectedProfile.value) return
+    backupInfo.value = await call<BackupInfo>('create_backup', { profileId: selectedProfile.value.id })
+    notifySuccess('백업을 만들었습니다.', backupInfo.value.filename)
+  })
+
+  const openPath = async (target: string) => runTask(`open-${target}`, async () => {
+    if (!selectedProfile.value) return
+    await call<void>('open_server_path', { profileId: selectedProfile.value.id, target })
+  })
+
+  const goToSettings = () => {
+    mainTab.value = 'settings'
+  }
+
+  const bindRuntimeEvents = async () => {
+    if (!isTauri()) return
+    unlisteners.push(await listen<ServerLogEvent>('server-log', (event) => pushRuntimeLog(event.payload.line)))
+    unlisteners.push(await listen<ServerStatus>('server-status', async (event) => {
+      const previousStatus = status.value.status
+      const previousProfileId = status.value.currentProfileId
+      applyStatus(event.payload)
+      if (selectedProfile.value && (previousStatus !== status.value.status || previousProfileId !== status.value.currentProfileId)) {
+        await refreshConfig()
+      }
+    }))
+  }
+
+  watch(() => newProfile.value.kind, (kind) => loadVersions(kind, true))
+  watch(selectedProfileId, refreshProfileData)
+  watch(mainTab, async (tab) => {
+    if (tab === 'settings') await refreshConfig()
+    if (tab === 'ops') await Promise.all([refreshAccessLists(), refreshConfig()])
+  })
+  watch(() => profileDraft.value?.kind, async (kind, oldKind) => {
+    if (!profileDraft.value || !kind || kind === oldKind) return
+    await loadVersions(kind, false, true)
+  })
+
+  onMounted(async () => {
+    try {
+      await bindRuntimeEvents()
+      await Promise.all([
+        refreshProfiles(),
+        loadVersions(newProfile.value.kind, true),
+        call<JavaRuntime[]>('scan_java_versions').then((result) => { javaVersions.value = result }),
+        refreshStatus()
+      ])
+      await refreshProfileData()
+      pollTimer = setInterval(refreshStatus, 10000)
+    } catch (error) {
+      setError(error)
+    }
+  })
+
+  onBeforeUnmount(() => {
+    if (pollTimer) clearInterval(pollTimer)
+    for (const unlisten of unlisteners) unlisten()
+  })
+
+  return reactive({
+    colorMode,
+    profiles,
+    selectedProfileId,
+    profileDraft,
+    versions,
+    createVersions,
+    javaVersions,
+    plan,
+    status,
+    config,
+    accessLists,
+    plugins,
+    modrinthProjects,
+    mainTab,
+    appSettingsOpen,
+    newProfileOpen,
+    versionLoading,
+    createVersionLoading,
+    logQuery,
+    commandText,
+    pluginQuery,
+    loading,
+    backupInfo,
+    playerActionOpen,
+    selectedPlayerName,
+    playerAction,
+    playerActionReason,
+    playerActionGamemode,
+    accessName,
+    banReason,
+    accessRawOpen,
+    newProfile,
+    selectedProfile,
+    activeProfileRunning,
+    anyServerRunning,
+    canUsePlugins,
+    filteredLogs,
+    versionOptions,
+    createVersionOptions,
+    profileKindLabel,
+    selectedJava,
+    selectedJavaPath,
+    whitelistEnabled,
+    serverKinds,
+    tabs,
+    themeOptions,
+    playerActionOptions,
+    gamemodeOptions,
+    statusLabel,
+    statusColor,
+    profileRuntimeStatus,
+    notifySuccess,
+    notifyError,
+    refreshProfileData,
+    refreshConfig,
+    refreshAccessLists,
+    refreshPlugins,
+    chooseDirectory,
+    resetNewProfile,
+    openNewProfileModal,
+    closeNewProfileModal,
+    createProfile,
+    saveProfile,
+    saveConfig,
+    toggleServer,
+    sendCommand,
+    refreshPlayers,
+    openPlayerAction,
+    closePlayerAction,
+    runPlayerAction,
+    searchPlugins,
+    installPlugin,
+    setPluginEnabled,
+    addAccessEntry,
+    removeAccessEntry,
+    saveAccessLists,
+    setWhitelistEnabled,
+    createBackup,
+    openPath,
+    goToSettings
+  })
+}
+
+export type LauncherState = ReturnType<typeof useLauncherState>
+
+const launcherKey: InjectionKey<LauncherState> = Symbol('launcher')
+
+export const provideLauncher = (launcher: LauncherState) => provide(launcherKey, launcher)
+
+export const useLauncher = () => {
+  const launcher = inject(launcherKey)
+  if (!launcher) throw new Error('Launcher state is not provided.')
+  return launcher
+}
