@@ -109,21 +109,17 @@ watch(
           </div>
           <div class="flex items-center justify-between gap-3">
             <span class="text-muted">외부 접속</span>
-            <UBadge :color="reachColor(launcher.network?.externalReachable)" variant="soft">{{ reachLabel(launcher.network?.externalReachable) }}</UBadge>
+            <div class="flex items-center gap-2">
+              <UTooltip v-if="launcher.network?.externalReachable === false" text="UPnP로 포트 열기">
+                <UButton size="xs" color="neutral" variant="subtle" icon="i-lucide-router"
+                  :loading="launcher.loading === 'upnp'" :disabled="!launcher.selectedProfile"
+                  @click="launcher.openUpnpPort" />
+              </UTooltip>
+              <UBadge :color="reachColor(launcher.network?.externalReachable)" variant="soft">{{ reachLabel(launcher.network?.externalReachable) }}</UBadge>
+            </div>
           </div>
         </div>
         <p v-if="launcher.network?.note" class="mt-3 text-xs leading-5 text-muted">{{ launcher.network.note }}</p>
-        <div class="mt-3 flex gap-2">
-          <UButton
-            size="sm"
-            icon="i-lucide-router"
-            :loading="launcher.loading === 'upnp'"
-            :disabled="!launcher.selectedProfile"
-            @click="launcher.openUpnpPort"
-          >
-            UPnP 열기
-          </UButton>
-        </div>
       </div>
 
       <div class="panel p-4">

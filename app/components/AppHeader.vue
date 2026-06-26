@@ -22,16 +22,6 @@ const launcher = useLauncher()
 
     <div class="relative flex items-center gap-2">
       <UButton
-        color="neutral"
-        variant="subtle"
-        icon="i-lucide-folder-open"
-        :disabled="!launcher.selectedProfile"
-        @click="launcher.openPath('server')"
-      >
-        서버 폴더
-      </UButton>
-      <UButton color="neutral" variant="subtle" icon="i-lucide-refresh-cw" @click="launcher.refreshProfileData">새로고침</UButton>
-      <UButton
         :color="launcher.activeProfileRunning ? 'error' : 'primary'"
         icon="i-lucide-power"
         :loading="launcher.loading === 'server'"
@@ -39,6 +29,8 @@ const launcher = useLauncher()
         @click="launcher.toggleServer"
       >
         {{ launcher.activeProfileRunning ? '서버 중지' : '서버 실행' }}
+      </UButton>
+      <UButton color="neutral" variant="subtle" icon="i-lucide-folder-open" :disabled="!launcher.selectedProfile" @click="launcher.openPath('server')">
       </UButton>
       <UButton color="neutral" variant="subtle" icon="i-lucide-settings" @click="launcher.appSettingsOpen = !launcher.appSettingsOpen" />
       <div v-if="launcher.appSettingsOpen" class="settings-popover">
