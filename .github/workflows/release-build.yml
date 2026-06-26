@@ -1,0 +1,114 @@
+name: Release Build
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  NODE_VERSION: 22
+  PNPM_VERSION: 10
+
+jobs:
+  release-build:
+    name: Release build (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            os: ubuntu-22.04
+            artifact: linux
+          - name: macOS
+            os: macos-latest
+            artifact: macos
+          - name: Windows
+            os: windows-latest
+            artifact: windows
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux Tauri dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      - name: Run Rust tests
+        working-directory: src-tauri
+        run: cargo test --locked
+
+      - name: Build Tauri release
+        run: pnpm run tauri:build
+
+      - name: Package release output
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          ref_name="${GITHUB_REF_NAME:-manual}"
+          ref_name="${ref_name//\//-}"
+          archive="minehub-server-launcher-${{ matrix.artifact }}-${ref_name}.tar.gz"
+          mkdir -p dist/release
+          cp -R src-tauri/target/release/bundle dist/release/bundle 2>/dev/null || true
+          cp src-tauri/target/release/minehub-server-launcher dist/release/ 2>/dev/null || true
+          cp src-tauri/target/release/minehub-server-launcher.exe dist/release/ 2>/dev/null || true
+          if [ -z "$(ls -A dist/release)" ]; then
+            echo "No release output found." >&2
+            exit 1
+          fi
+          tar -czf "$archive" -C dist/release .
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.artifact }}
+          if-no-files-found: error
+          retention-days: 30
+          path: ${{ steps.package.outputs.archive }}
+
+      - name: Upload to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.package.outputs.archive }}
