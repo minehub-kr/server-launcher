@@ -1,6 +1,7 @@
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeSet, sync::Arc};
+use sysinfo::System;
 use tokio::{process::ChildStdin, sync::Mutex};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -122,6 +123,7 @@ pub struct ServerRuntime {
 pub struct AppState {
     pub runtime: Arc<Mutex<ServerRuntime>>,
     pub http: Client,
+    pub system: Arc<Mutex<System>>,
 }
 
 impl Default for AppState {
@@ -135,6 +137,7 @@ impl Default for AppState {
                 .user_agent("Minehub Server Launcher (kr.minehub.mclauncher)")
                 .build()
                 .expect("reqwest client should build"),
+            system: Arc::new(Mutex::new(System::new_all())),
         }
     }
 }
@@ -261,6 +264,41 @@ pub struct ServerStatus {
     pub data_dir: String,
     pub crash_detected: bool,
     pub exit_message: Option<String>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkDiagnostics {
+    pub port: u16,
+    pub local_address: Option<String>,
+    pub public_address: Option<String>,
+    pub lan_endpoint: Option<String>,
+    pub public_endpoint: Option<String>,
+    pub local_reachable: bool,
+    pub external_reachable: Option<bool>,
+    pub note: String,
+    pub checked_at: u64,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpnpMappingResult {
+    pub external_address: Option<String>,
+    pub internal_address: String,
+    pub external_port: u16,
+    pub internal_port: u16,
+    pub protocol: String,
+    pub note: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SystemMetrics {
+    pub cpu_usage: f32,
+    pub memory_used_mb: u64,
+    pub memory_total_mb: u64,
+    pub memory_usage: f32,
+    pub sampled_at: u64,
 }
 
 #[derive(Clone, Serialize)]

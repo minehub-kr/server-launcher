@@ -19,11 +19,14 @@ import {
   type AccessLists,
   type BackupInfo,
   type DeleteProfileResult,
+  type EulaStatus,
   type InstalledPlugin,
   type JavaRuntime,
+  type MetricPoint,
   type MinecraftIdentity,
   type MainTab,
   type ModrinthProject,
+  type NetworkDiagnostics,
   type PlayerAction,
   type PluginFile,
   type ServerConfigBundle,
@@ -33,7 +36,9 @@ import {
   type ServerProfile,
   type ServerStatus,
   type ServerVersion,
-  type ThemeMode
+  type SystemMetrics,
+  type ThemeMode,
+  type UpnpMappingResult
 } from '~/types/launcher'
 
 const mockVersions: Record<ServerKind, ServerVersion[]> = {
@@ -46,6 +51,7 @@ const mockVersions: Record<ServerKind, ServerVersion[]> = {
 const mockProfiles: ServerProfile[] = []
 let mockAccess = emptyAccessLists()
 let mockRuntimeStatus = mockStatus()
+const mockAcceptedEula = new Set<string>()
 
 const isTauri = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 
@@ -96,6 +102,25 @@ const call = async <T,>(command: string, args?: Record<string, unknown>) => {
     mockProfiles.splice(index, 1)
     return { profiles: mockProfiles, fileDeleteError: null } as T
   }
+  if (command === 'eula_status') {
+    const profileId = String(args?.profileId || '')
+    const profile = mockProfiles.find((item) => item.id === profileId)
+    return {
+      accepted: mockAcceptedEula.has(profileId),
+      path: `${profile?.serverDir || '/Users/example/Minecraft Servers/New Server'}/eula.txt`,
+      url: 'https://aka.ms/MinecraftEULA'
+    } as T
+  }
+  if (command === 'accept_eula') {
+    const profileId = String(args?.profileId || '')
+    const profile = mockProfiles.find((item) => item.id === profileId)
+    mockAcceptedEula.add(profileId)
+    return {
+      accepted: true,
+      path: `${profile?.serverDir || '/Users/example/Minecraft Servers/New Server'}/eula.txt`,
+      url: 'https://aka.ms/MinecraftEULA'
+    } as T
+  }
   if (command === 'resolve_server_plan') {
     const profile = mockProfiles.find((item) => item.id === args?.profileId)
     return {
@@ -127,6 +152,7 @@ const call = async <T,>(command: string, args?: Record<string, unknown>) => {
   }
   if (command === 'save_server_config') return args?.bundle as T
   if (command === 'start_server') {
+    if (!mockAcceptedEula.has(String(args?.profileId || ''))) throw new Error('Minecraft EULA 동의가 필요합니다.')
     mockRuntimeStatus = {
       ...mockRuntimeStatus,
       running: true,
@@ -147,6 +173,44 @@ const call = async <T,>(command: string, args?: Record<string, unknown>) => {
     return { ...mockRuntimeStatus, logs: [...mockRuntimeStatus.logs] } as T
   }
   if (command === 'server_status') return { ...mockRuntimeStatus, logs: [...mockRuntimeStatus.logs] } as T
+  if (command === 'network_diagnostics') {
+    const profile = mockProfiles.find((item) => item.id === args?.profileId)
+    const port = profile?.settings.serverPort || 25565
+    return {
+      port,
+      localAddress: '192.168.0.20',
+      publicAddress: '203.0.113.10',
+      lanEndpoint: `192.168.0.20:${port}`,
+      publicEndpoint: `203.0.113.10:${port}`,
+      localReachable: mockRuntimeStatus.currentProfileId === profile?.id,
+      externalReachable: false,
+      note: '브라우저 미리보기 모드입니다.',
+      checkedAt: Math.floor(Date.now() / 1000)
+    } as T
+  }
+  if (command === 'open_upnp_port') {
+    const profile = mockProfiles.find((item) => item.id === args?.profileId)
+    const port = profile?.settings.serverPort || 25565
+    return {
+      externalAddress: '203.0.113.10',
+      internalAddress: '192.168.0.20',
+      externalPort: port,
+      internalPort: port,
+      protocol: 'TCP',
+      note: '브라우저 미리보기 모드입니다.'
+    } as T
+  }
+  if (command === 'system_metrics') {
+    const cpuUsage = 24 + Math.random() * 18
+    const memoryUsage = 48 + Math.random() * 9
+    return {
+      cpuUsage,
+      memoryTotalMb: 32768,
+      memoryUsedMb: Math.round(32768 * memoryUsage / 100),
+      memoryUsage,
+      sampledAt: Math.floor(Date.now() / 1000)
+    } as T
+  }
   if (command === 'list_plugins' || command === 'search_modrinth') return [] as T
   if (command === 'set_plugin_enabled') return [] as T
   if (command === 'install_modrinth_plugin') return { filename: 'plugin.jar' } as T
@@ -167,6 +231,12 @@ export const useLauncherState = () => {
   const javaVersions = ref<JavaRuntime[]>([])
   const plan = ref<ServerPlan | null>(null)
   const status = ref<ServerStatus>(mockStatus())
+  const eula = ref<EulaStatus | null>(null)
+  const eulaDialogOpen = ref(false)
+  const eulaAgreementChecked = ref(false)
+  const network = ref<NetworkDiagnostics | null>(null)
+  const metrics = ref<SystemMetrics | null>(null)
+  const metricHistory = ref<MetricPoint[]>([])
   const config = ref<ServerConfigBundle | null>(null)
   const accessLists = ref<AccessLists>(emptyAccessLists())
   const plugins = ref<PluginFile[]>([])
@@ -201,6 +271,7 @@ export const useLauncherState = () => {
   const newProfile = ref(defaultNewProfile())
 
   let pollTimer: ReturnType<typeof setInterval> | undefined
+  let metricsTimer: ReturnType<typeof setInterval> | undefined
   const unlisteners: UnlistenFn[] = []
   let versionRequestId = 0
   let createVersionRequestId = 0
@@ -223,6 +294,12 @@ export const useLauncherState = () => {
   const profileRuntimeStatus = (profile: ServerProfile) => status.value.currentProfileId === profile.id ? status.value.status : 'stopped'
   const formatJson = (value: unknown) => `${JSON.stringify(value, null, 2)}\n`
   const validPlayerName = (name: string) => /^[A-Za-z0-9_]{1,16}$/.test(name)
+  const sampleLabel = (sampledAt: number) => new Date(sampledAt * 1000).toLocaleTimeString('ko-KR', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  })
 
   const friendlyError = (error: unknown) => {
     const text = error instanceof Error ? error.message : String(error)
@@ -326,6 +403,7 @@ export const useLauncherState = () => {
     applyStatus(await call<ServerStatus>('server_status'))
     if (selectedProfile.value && (previousStatus !== status.value.status || previousProfileId !== status.value.currentProfileId)) {
       await refreshConfig()
+      loadNetworkDiagnostics().catch(() => { network.value = null })
     }
   }
 
@@ -335,6 +413,33 @@ export const useLauncherState = () => {
 
   const refreshConfig = async () => {
     config.value = selectedProfile.value ? await call<ServerConfigBundle>('read_server_config', { profileId: selectedProfile.value.id }) : null
+  }
+
+  const loadNetworkDiagnostics = async () => {
+    network.value = selectedProfile.value
+      ? await call<NetworkDiagnostics>('network_diagnostics', { profileId: selectedProfile.value.id })
+      : null
+  }
+
+  const refreshNetworkDiagnostics = async () => runTask('network-diagnostics', loadNetworkDiagnostics)
+
+  const openUpnpPort = async () => runTask('upnp', async () => {
+    if (!selectedProfile.value) return
+    const result = await call<UpnpMappingResult>('open_upnp_port', { profileId: selectedProfile.value.id })
+    notifySuccess('UPnP 포트를 열었습니다.', `${result.externalAddress || result.internalAddress}:${result.externalPort}/${result.protocol}`)
+    await loadNetworkDiagnostics()
+  })
+
+  const pushMetrics = (next: SystemMetrics) => {
+    metrics.value = next
+    metricHistory.value = [
+      ...metricHistory.value.slice(-39),
+      { ...next, label: sampleLabel(next.sampledAt) }
+    ]
+  }
+
+  const refreshSystemMetrics = async () => {
+    pushMetrics(await call<SystemMetrics>('system_metrics'))
   }
 
   const refreshAccessLists = async () => {
@@ -358,6 +463,9 @@ export const useLauncherState = () => {
     if (!profile) {
       profileDraft.value = null
       config.value = null
+      eula.value = null
+      closeEulaDialog()
+      network.value = null
       plugins.value = []
       accessLists.value = emptyAccessLists()
       return
@@ -366,6 +474,8 @@ export const useLauncherState = () => {
     profileDraft.value = cloneProfile(profile)
     await loadVersions(profile.kind)
     await Promise.all([refreshPlan(), refreshConfig(), refreshAccessLists(), refreshPlugins()])
+    refreshEulaStatus().catch(() => { eula.value = null })
+    loadNetworkDiagnostics().catch(() => { network.value = null })
   }
 
   const chooseDirectory = async (target: 'create' | 'profile') => {
@@ -398,6 +508,17 @@ export const useLauncherState = () => {
   const closeDeleteProfileDialog = () => {
     profileDeleteOpen.value = false
     deleteProfileFiles.value = false
+  }
+
+  const openEulaDialog = (status: EulaStatus) => {
+    eula.value = status
+    eulaAgreementChecked.value = false
+    eulaDialogOpen.value = true
+  }
+
+  const closeEulaDialog = () => {
+    eulaDialogOpen.value = false
+    eulaAgreementChecked.value = false
   }
 
   const createProfile = async () => runTask('create-profile', async () => {
@@ -449,13 +570,41 @@ export const useLauncherState = () => {
     notifySuccess('서버 설정을 저장했습니다.', '일부 값은 재시작 후 적용됩니다.')
   })
 
+  const startSelectedServer = async () => {
+    if (!selectedProfile.value) return
+    applyStatus(await call<ServerStatus>('start_server', { profileId: selectedProfile.value.id }))
+    await refreshProfileData()
+  }
+
   const toggleServer = async () => runTask('server', async () => {
     if (!selectedProfile.value) return
-    applyStatus(activeProfileRunning.value
-      ? await call<ServerStatus>('stop_server')
-      : await call<ServerStatus>('start_server', { profileId: selectedProfile.value.id }))
-    await refreshProfileData()
+    if (activeProfileRunning.value) {
+      applyStatus(await call<ServerStatus>('stop_server'))
+      await refreshProfileData()
+      return
+    }
+
+    const status = await call<EulaStatus>('eula_status', { profileId: selectedProfile.value.id })
+    eula.value = status
+    if (!status.accepted) {
+      openEulaDialog(status)
+      return
+    }
+    await startSelectedServer()
   })
+
+  const acceptEulaAndStart = async () => runTask('server', async () => {
+    if (!selectedProfile.value || !eulaAgreementChecked.value) return
+    eula.value = await call<EulaStatus>('accept_eula', { profileId: selectedProfile.value.id })
+    closeEulaDialog()
+    await startSelectedServer()
+  })
+
+  const refreshEulaStatus = async () => {
+    eula.value = selectedProfile.value
+      ? await call<EulaStatus>('eula_status', { profileId: selectedProfile.value.id })
+      : null
+  }
 
   const sendCommand = async (command = commandText.value) => runTask('command', async () => {
     const trimmed = command.trim()
@@ -652,6 +801,7 @@ export const useLauncherState = () => {
       applyStatus(event.payload)
       if (selectedProfile.value && (previousStatus !== status.value.status || previousProfileId !== status.value.currentProfileId)) {
         await refreshConfig()
+        loadNetworkDiagnostics().catch(() => { network.value = null })
       }
     }))
   }
@@ -674,10 +824,14 @@ export const useLauncherState = () => {
         refreshProfiles(),
         loadVersions(newProfile.value.kind, true),
         call<JavaRuntime[]>('scan_java_versions').then((result) => { javaVersions.value = result }),
-        refreshStatus()
+        refreshStatus(),
+        refreshSystemMetrics()
       ])
       await refreshProfileData()
       pollTimer = setInterval(refreshStatus, 10000)
+      metricsTimer = setInterval(() => {
+        refreshSystemMetrics().catch(() => {})
+      }, 3000)
     } catch (error) {
       setError(error)
     }
@@ -685,6 +839,7 @@ export const useLauncherState = () => {
 
   onBeforeUnmount(() => {
     if (pollTimer) clearInterval(pollTimer)
+    if (metricsTimer) clearInterval(metricsTimer)
     for (const unlisten of unlisteners) unlisten()
   })
 
@@ -699,6 +854,12 @@ export const useLauncherState = () => {
     javaVersions,
     plan,
     status,
+    eula,
+    eulaDialogOpen,
+    eulaAgreementChecked,
+    network,
+    metrics,
+    metricHistory,
     config,
     accessLists,
     plugins,
@@ -749,6 +910,9 @@ export const useLauncherState = () => {
     notifyWarning,
     refreshProfileData,
     refreshConfig,
+    refreshNetworkDiagnostics,
+    openUpnpPort,
+    refreshSystemMetrics,
     refreshAccessLists,
     refreshPlugins,
     chooseDirectory,
@@ -757,11 +921,14 @@ export const useLauncherState = () => {
     closeNewProfileModal,
     openDeleteProfileDialog,
     closeDeleteProfileDialog,
+    closeEulaDialog,
     createProfile,
     saveProfile,
     deleteProfile,
     saveConfig,
     toggleServer,
+    acceptEulaAndStart,
+    refreshEulaStatus,
     sendCommand,
     refreshPlayers,
     openPlayerAction,

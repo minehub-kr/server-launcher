@@ -53,6 +53,7 @@ provideLauncher(launcher)
       <NewProfileModal />
       <PlayerActionDialog />
       <ProfileDeleteDialog />
+      <EulaDialog />
     </div>
   </main>
 </template>

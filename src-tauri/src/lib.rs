@@ -27,6 +27,8 @@ pub fn run() {
             config::lookup_minecraft_profile,
             config::read_access_lists,
             config::save_access_lists,
+            runtime::eula_status,
+            runtime::accept_eula,
             runtime::start_server,
             runtime::stop_server,
             runtime::send_server_command,
@@ -36,7 +38,10 @@ pub fn run() {
             plugins::list_plugins,
             plugins::set_plugin_enabled,
             backup::create_backup,
-            system::open_server_path
+            system::open_server_path,
+            system::network_diagnostics,
+            system::open_upnp_port,
+            system::system_metrics
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

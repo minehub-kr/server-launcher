@@ -65,6 +65,45 @@ export type ServerStatus = {
   exitMessage: string | null
 }
 
+export type EulaStatus = {
+  accepted: boolean
+  path: string
+  url: string
+}
+
+export type NetworkDiagnostics = {
+  port: number
+  localAddress: string | null
+  publicAddress: string | null
+  lanEndpoint: string | null
+  publicEndpoint: string | null
+  localReachable: boolean
+  externalReachable: boolean | null
+  note: string
+  checkedAt: number
+}
+
+export type UpnpMappingResult = {
+  externalAddress: string | null
+  internalAddress: string
+  externalPort: number
+  internalPort: number
+  protocol: string
+  note: string
+}
+
+export type SystemMetrics = {
+  cpuUsage: number
+  memoryUsedMb: number
+  memoryTotalMb: number
+  memoryUsage: number
+  sampledAt: number
+}
+
+export type MetricPoint = SystemMetrics & {
+  label: string
+}
+
 export type ServerLogEvent = {
   line: string
 }

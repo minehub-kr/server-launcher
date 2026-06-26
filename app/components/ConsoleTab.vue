@@ -1,10 +1,29 @@
 <script setup lang="ts">
-import { nextTick, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useLauncher } from '~/composables/useLauncherState'
 import { parseConsoleLine } from '~/utils/consoleLog'
 
 const launcher = useLauncher()
 const logViewport = ref<HTMLElement | null>(null)
+const chartPoints = (values: number[]) => {
+  if (!values.length) return ''
+  const width = 100
+  const height = 48
+  const step = values.length > 1 ? width / (values.length - 1) : 0
+  return values
+    .map((value, index) => `${index * step},${height - (Math.min(100, Math.max(0, value)) / 100) * height}`)
+    .join(' ')
+}
+const cpuPoints = computed(() => chartPoints(launcher.metricHistory.map((point) => point.cpuUsage)))
+const memoryPoints = computed(() => chartPoints(launcher.metricHistory.map((point) => point.memoryUsage)))
+const latestMetricLabel = computed(() => launcher.metricHistory.at(-1)?.label || '수집 중')
+const memoryText = computed(() => {
+  const metrics = launcher.metrics
+  return metrics ? `${metrics.memoryUsedMb.toLocaleString()} / ${metrics.memoryTotalMb.toLocaleString()} MB` : '-'
+})
+const percentText = (value?: number) => `${Math.round(value || 0)}%`
+const reachLabel = (value?: boolean | null) => value === true ? '가능' : value === false ? '불가' : '확인 전'
+const reachColor = (value?: boolean | null) => value === true ? 'success' : value === false ? 'error' : 'neutral'
 
 const scrollToBottom = async () => {
   await nextTick()
@@ -48,6 +67,84 @@ watch(
     </div>
 
     <aside class="min-h-0 space-y-4 overflow-auto">
+      <div class="panel p-4">
+        <div class="mb-3 flex items-center justify-between gap-2">
+          <p class="metric-label">접속 정보</p>
+          <UButton
+            size="sm"
+            color="neutral"
+            variant="subtle"
+            icon="i-lucide-refresh-cw"
+            :loading="launcher.loading === 'network-diagnostics'"
+            :disabled="!launcher.selectedProfile"
+            @click="launcher.refreshNetworkDiagnostics"
+          />
+        </div>
+        <p class="metric-value">{{ launcher.network?.publicEndpoint || launcher.network?.lanEndpoint || '-' }}</p>
+        <div class="mt-3 grid gap-2 text-sm">
+          <div class="flex items-center justify-between gap-3">
+            <span class="text-muted">포트</span>
+            <span class="font-medium text-highlighted">{{ launcher.network?.port || launcher.config?.properties.serverPort || '-' }}</span>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <span class="text-muted">LAN 주소</span>
+            <span class="truncate font-medium text-highlighted">{{ launcher.network?.lanEndpoint || '-' }}</span>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <span class="text-muted">공인 주소</span>
+            <span class="truncate font-medium text-highlighted">{{ launcher.network?.publicEndpoint || '-' }}</span>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <span class="text-muted">로컬 접속</span>
+            <UBadge :color="reachColor(launcher.network?.localReachable)" variant="soft">{{ reachLabel(launcher.network?.localReachable) }}</UBadge>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <span class="text-muted">외부 접속</span>
+            <UBadge :color="reachColor(launcher.network?.externalReachable)" variant="soft">{{ reachLabel(launcher.network?.externalReachable) }}</UBadge>
+          </div>
+        </div>
+        <p v-if="launcher.network?.note" class="mt-3 text-xs leading-5 text-muted">{{ launcher.network.note }}</p>
+        <div class="mt-3 flex gap-2">
+          <UButton
+            size="sm"
+            icon="i-lucide-router"
+            :loading="launcher.loading === 'upnp'"
+            :disabled="!launcher.selectedProfile"
+            @click="launcher.openUpnpPort"
+          >
+            UPnP 열기
+          </UButton>
+        </div>
+      </div>
+
+      <div class="panel p-4">
+        <div class="mb-3 flex items-center justify-between gap-2">
+          <p class="metric-label">시스템 리소스</p>
+          <span class="text-xs text-muted">{{ latestMetricLabel }}</span>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <p class="text-xs text-muted">CPU</p>
+            <p class="text-lg font-semibold text-highlighted">{{ percentText(launcher.metrics?.cpuUsage) }}</p>
+          </div>
+          <div>
+            <p class="text-xs text-muted">메모리</p>
+            <p class="text-lg font-semibold text-highlighted">{{ percentText(launcher.metrics?.memoryUsage) }}</p>
+            <p class="truncate text-xs text-muted">{{ memoryText }}</p>
+          </div>
+        </div>
+        <svg class="mt-4 h-28 w-full overflow-visible" viewBox="0 0 100 48" preserveAspectRatio="none" role="img" aria-label="CPU 및 메모리 사용량 그래프">
+          <line x1="0" y1="48" x2="100" y2="48" stroke="var(--ui-border)" stroke-width="1" />
+          <line x1="0" y1="24" x2="100" y2="24" stroke="var(--ui-border)" stroke-width="0.5" opacity="0.7" />
+          <polyline v-if="memoryPoints" :points="memoryPoints" fill="none" stroke="#f59e0b" stroke-width="2" vector-effect="non-scaling-stroke" />
+          <polyline v-if="cpuPoints" :points="cpuPoints" fill="none" stroke="var(--ui-primary)" stroke-width="2" vector-effect="non-scaling-stroke" />
+        </svg>
+        <div class="mt-2 flex items-center gap-4 text-xs text-muted">
+          <span class="inline-flex items-center gap-1"><span class="size-2 rounded-sm bg-primary" />CPU</span>
+          <span class="inline-flex items-center gap-1"><span class="size-2 rounded-sm bg-amber-500" />메모리</span>
+        </div>
+      </div>
+
       <div class="panel p-4">
         <p class="metric-label">서버</p>
         <p class="metric-value">{{ launcher.selectedProfile?.kind }} {{ launcher.selectedProfile?.minecraftVersion }}</p>

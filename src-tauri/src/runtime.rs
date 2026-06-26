@@ -6,13 +6,56 @@ use crate::{
     system::{app_data_dir, crash_line, port_available, timestamp},
     versions::{fetch_version_detail_by_id, prepare_server_jar},
 };
-use std::{process::Stdio, sync::Arc};
+use serde::Serialize;
+use std::{
+    path::{Path, PathBuf},
+    process::Stdio,
+    sync::Arc,
+};
 use tauri::{AppHandle, Emitter, State};
 use tokio::{
     io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader},
     process::Command,
     sync::Mutex,
 };
+
+const EULA_URL: &str = "https://aka.ms/MinecraftEULA";
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EulaStatus {
+    pub accepted: bool,
+    pub path: String,
+    pub url: String,
+}
+
+#[tauri::command]
+pub async fn eula_status(app: AppHandle, profile_id: String) -> Result<EulaStatus, String> {
+    let profile = crate::settings::find_profile(&app, &profile_id).await?;
+    let path = eula_path(&profile.server_dir);
+    Ok(EulaStatus {
+        accepted: eula_accepted(&path).await?,
+        path: path.to_string_lossy().to_string(),
+        url: EULA_URL.to_string(),
+    })
+}
+
+#[tauri::command]
+pub async fn accept_eula(app: AppHandle, profile_id: String) -> Result<EulaStatus, String> {
+    let profile = crate::settings::find_profile(&app, &profile_id).await?;
+    tokio::fs::create_dir_all(&profile.server_dir)
+        .await
+        .map_err(|error| format!("서버 폴더 생성 실패: {error}"))?;
+    let path = eula_path(&profile.server_dir);
+    tokio::fs::write(&path, "eula=true\n")
+        .await
+        .map_err(|error| format!("EULA 파일 작성 실패: {error}"))?;
+    Ok(EulaStatus {
+        accepted: true,
+        path: path.to_string_lossy().to_string(),
+        url: EULA_URL.to_string(),
+    })
+}
 
 #[tauri::command]
 pub async fn start_server(
@@ -34,6 +77,10 @@ pub async fn start_server(
         .position(|profile| profile.id == profile_id)
         .ok_or_else(|| "프로필을 찾지 못했습니다.".to_string())?;
     let mut profile = settings.profiles[index].clone();
+    if !eula_accepted(&eula_path(&profile.server_dir)).await? {
+        return Err("Minecraft EULA 동의가 필요합니다.".to_string());
+    }
+
     let detail = fetch_version_detail_by_id(&state.http, &profile.minecraft_version).await?;
     let java = choose_java(&profile, detail.java_version.major_version)
         .await?
@@ -55,12 +102,6 @@ pub async fn start_server(
     tokio::fs::create_dir_all(&profile.server_dir)
         .await
         .map_err(|error| format!("서버 폴더 생성 실패: {error}"))?;
-    tokio::fs::write(
-        std::path::Path::new(&profile.server_dir).join("eula.txt"),
-        "eula=true\n",
-    )
-    .await
-    .map_err(|error| format!("EULA 파일 작성 실패: {error}"))?;
     write_default_properties(&profile, &config.properties).await?;
 
     let jar = prepare_server_jar(&state.http, &profile, &detail).await?;
@@ -336,6 +377,25 @@ fn process_crashed(stop_requested: bool, exit_success: Option<bool>) -> bool {
     !stop_requested && !exit_success.unwrap_or(false)
 }
 
+fn eula_path(server_dir: &str) -> PathBuf {
+    Path::new(server_dir).join("eula.txt")
+}
+
+async fn eula_accepted(path: &Path) -> Result<bool, String> {
+    let Ok(content) = tokio::fs::read_to_string(path).await else {
+        return Ok(false);
+    };
+    Ok(eula_content_accepted(&content))
+}
+
+fn eula_content_accepted(content: &str) -> bool {
+    content.lines().any(|line| {
+        line.split_once('=').is_some_and(|(key, value)| {
+            key.trim().eq_ignore_ascii_case("eula") && value.trim().eq_ignore_ascii_case("true")
+        })
+    })
+}
+
 fn append_and_emit_log(app: &AppHandle, runtime: &mut ServerRuntime, line: String) {
     let event = ServerLogEvent { line: line.clone() };
     runtime.logs.push(line);
@@ -469,5 +529,18 @@ mod tests {
     #[test]
     fn unexpected_nonzero_exit_is_crash() {
         assert!(process_crashed(false, Some(false)));
+    }
+
+    #[test]
+    fn eula_true_is_accepted() {
+        assert!(eula_content_accepted("eula=true\n"));
+        assert!(eula_content_accepted("# comment\neula = TRUE\n"));
+    }
+
+    #[test]
+    fn eula_false_or_missing_is_not_accepted() {
+        assert!(!eula_content_accepted(""));
+        assert!(!eula_content_accepted("eula=false\n"));
+        assert!(!eula_content_accepted("other=true\n"));
     }
 }

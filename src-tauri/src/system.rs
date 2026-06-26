@@ -2,14 +2,18 @@ use reqwest::Client;
 use serde::Deserialize;
 use sha1::{Digest, Sha1};
 use std::{
-    net::TcpListener,
+    net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener, UdpSocket},
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
-use tauri::{AppHandle, Manager};
-use tokio::fs;
+use tauri::{AppHandle, Manager, State};
+use tokio::{fs, net::TcpStream, time::Duration};
 
-use crate::settings::find_profile;
+use crate::{
+    config::read_config_bundle,
+    models::{AppState, NetworkDiagnostics, SystemMetrics, UpnpMappingResult},
+    settings::find_profile,
+};
 
 pub const MINECRAFT_MANIFEST_URL: &str =
     "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
@@ -159,6 +163,145 @@ pub fn hyphenate_uuid(raw: &str) -> String {
         &id[16..20],
         &id[20..32]
     )
+}
+
+#[derive(Deserialize)]
+struct PublicIpResponse {
+    ip: String,
+}
+
+#[tauri::command]
+pub async fn network_diagnostics(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    profile_id: String,
+) -> Result<NetworkDiagnostics, String> {
+    let profile = find_profile(&app, &profile_id).await?;
+    let config = read_config_bundle(&profile).await?;
+    let port = config.properties.server_port;
+    let local_address = local_ipv4().map(|ip| ip.to_string());
+    let public_address = public_ip(&state).await.ok();
+    let local_reachable = tcp_reachable(IpAddr::from([127, 0, 0, 1]), port).await;
+    let external_reachable = match public_address.as_deref().and_then(|ip| ip.parse().ok()) {
+        Some(ip) => Some(tcp_reachable(ip, port).await),
+        None => None,
+    };
+    let lan_endpoint = local_address.as_ref().map(|ip| endpoint(ip, port));
+    let public_endpoint = public_address.as_ref().map(|ip| endpoint(ip, port));
+
+    Ok(NetworkDiagnostics {
+        port,
+        local_address,
+        public_address,
+        lan_endpoint,
+        public_endpoint,
+        local_reachable,
+        external_reachable,
+        note: "외부 접속 확인은 공유기의 NAT loopback 지원 여부에 따라 실제 외부 결과와 다를 수 있습니다."
+            .to_string(),
+        checked_at: timestamp(),
+    })
+}
+
+#[tauri::command]
+pub async fn open_upnp_port(
+    app: AppHandle,
+    profile_id: String,
+) -> Result<UpnpMappingResult, String> {
+    let profile = find_profile(&app, &profile_id).await?;
+    let config = read_config_bundle(&profile).await?;
+    let port = config.properties.server_port;
+    let local_ip = local_ipv4().ok_or_else(|| "로컬 IPv4 주소를 찾지 못했습니다.".to_string())?;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let gateway = igd::search_gateway(Default::default())
+            .map_err(|error| format!("UPnP 게이트웨이 검색 실패: {error}"))?;
+        gateway
+            .add_port(
+                igd::PortMappingProtocol::TCP,
+                port,
+                SocketAddrV4::new(local_ip, port),
+                0,
+                "Minehub Minecraft Server",
+            )
+            .map_err(|error| format!("UPnP 포트 매핑 실패: {error}"))?;
+        let external_address = gateway.get_external_ip().ok().map(|ip| ip.to_string());
+
+        Ok(UpnpMappingResult {
+            external_address,
+            internal_address: local_ip.to_string(),
+            external_port: port,
+            internal_port: port,
+            protocol: "TCP".to_string(),
+            note: "공유기에서 UPnP가 활성화되어 있어야 유지됩니다.".to_string(),
+        })
+    })
+    .await
+    .map_err(|error| format!("UPnP 작업 실패: {error}"))?
+}
+
+#[tauri::command]
+pub async fn system_metrics(state: State<'_, AppState>) -> Result<SystemMetrics, String> {
+    let mut system = state.system.lock().await;
+    system.refresh_cpu();
+    system.refresh_memory();
+
+    let memory_total_mb = system.total_memory() / 1024 / 1024;
+    let memory_used_mb = system.used_memory() / 1024 / 1024;
+    let memory_usage = if memory_total_mb == 0 {
+        0.0
+    } else {
+        (memory_used_mb as f32 / memory_total_mb as f32) * 100.0
+    };
+
+    Ok(SystemMetrics {
+        cpu_usage: system.global_cpu_info().cpu_usage(),
+        memory_used_mb,
+        memory_total_mb,
+        memory_usage,
+        sampled_at: timestamp(),
+    })
+}
+
+fn local_ipv4() -> Option<Ipv4Addr> {
+    let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("8.8.8.8:80").ok()?;
+    match socket.local_addr().ok()?.ip() {
+        IpAddr::V4(ip) if !ip.is_loopback() => Some(ip),
+        _ => None,
+    }
+}
+
+async fn public_ip(state: &State<'_, AppState>) -> Result<String, String> {
+    state
+        .http
+        .get("https://api.ipify.org?format=json")
+        .send()
+        .await
+        .map_err(|error| format!("공인 IP 확인 실패: {error}"))?
+        .error_for_status()
+        .map_err(|error| format!("공인 IP 응답 오류: {error}"))?
+        .json::<PublicIpResponse>()
+        .await
+        .map(|response| response.ip)
+        .map_err(|error| format!("공인 IP 응답 파싱 실패: {error}"))
+}
+
+async fn tcp_reachable(ip: IpAddr, port: u16) -> bool {
+    tokio::time::timeout(
+        Duration::from_millis(1500),
+        TcpStream::connect(SocketAddr::new(ip, port)),
+    )
+    .await
+    .is_ok_and(|result| result.is_ok())
+}
+
+fn endpoint(address: &str, port: u16) -> String {
+    if address.contains(':') {
+        format!("[{address}]:{port}")
+    } else {
+        format!("{address}:{port}")
+    }
 }
 
 #[cfg(test)]
