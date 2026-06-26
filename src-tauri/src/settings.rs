@@ -1,11 +1,19 @@
 use crate::{
-    models::{AppSettings, CreateProfileInput, ServerProfile, ServerProperties},
+    models::{AppSettings, AppState, CreateProfileInput, ServerProfile, ServerProperties},
     system::{app_data_dir, default_profile_dir, timestamp},
 };
-use std::path::PathBuf;
-use tauri::AppHandle;
+use serde::Serialize;
+use std::path::{Path, PathBuf};
+use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 use tokio::fs;
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteProfileResult {
+    pub profiles: Vec<ServerProfile>,
+    pub file_delete_error: Option<String>,
+}
 
 #[tauri::command]
 pub async fn list_profiles(app: AppHandle) -> Result<Vec<ServerProfile>, String> {
@@ -74,6 +82,51 @@ pub async fn update_profile(
 }
 
 #[tauri::command]
+pub async fn delete_profile(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    profile_id: String,
+    delete_files: bool,
+) -> Result<DeleteProfileResult, String> {
+    {
+        let runtime = state.runtime.lock().await;
+        if runtime.current_profile_id.as_deref() == Some(profile_id.as_str()) {
+            return Err("실행 중인 프로필은 삭제할 수 없습니다.".to_string());
+        }
+    }
+
+    let mut settings = load_settings(&app).await?;
+    let index = settings
+        .profiles
+        .iter()
+        .position(|profile| profile.id == profile_id)
+        .ok_or_else(|| "프로필을 찾지 못했습니다.".to_string())?;
+    let profile = settings.profiles.remove(index);
+
+    if settings.selected_profile_id.as_deref() == Some(profile.id.as_str())
+        || settings
+            .selected_profile_id
+            .as_ref()
+            .is_some_and(|id| !settings.profiles.iter().any(|profile| &profile.id == id))
+    {
+        settings.selected_profile_id = settings.profiles.first().map(|profile| profile.id.clone());
+    }
+
+    save_settings(&app, &settings).await?;
+
+    let file_delete_error = if delete_files {
+        delete_profile_dir(&app, &profile.server_dir).await.err()
+    } else {
+        None
+    };
+
+    Ok(DeleteProfileResult {
+        profiles: settings.profiles,
+        file_delete_error,
+    })
+}
+
+#[tauri::command]
 pub async fn choose_server_directory(app: AppHandle) -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         Ok(app
@@ -119,4 +172,57 @@ pub async fn find_profile(app: &AppHandle, profile_id: &str) -> Result<ServerPro
 
 fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app_data_dir(app)?.join("settings.json"))
+}
+
+async fn delete_profile_dir(app: &AppHandle, path: &str) -> Result<(), String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("서버 폴더 경로가 비어 있어 파일 삭제를 건너뛰었습니다.".to_string());
+    }
+
+    let dir = PathBuf::from(trimmed);
+    ensure_deletable_profile_dir(app, &dir)?;
+
+    match fs::symlink_metadata(&dir).await {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            Err("심볼릭 링크 서버 폴더는 삭제하지 않습니다.".to_string())
+        }
+        Ok(metadata) if metadata.is_dir() => fs::remove_dir_all(&dir)
+            .await
+            .map_err(|error| format!("서버 폴더 삭제 실패: {error}")),
+        Ok(_) => Err("서버 폴더 경로가 디렉터리가 아닙니다.".to_string()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("서버 폴더 확인 실패: {error}")),
+    }
+}
+
+fn ensure_deletable_profile_dir(app: &AppHandle, dir: &Path) -> Result<(), String> {
+    if !dir.is_absolute() {
+        return Err("절대 경로가 아닌 서버 폴더는 삭제하지 않습니다.".to_string());
+    }
+    if dir.parent().is_none() {
+        return Err("파일시스템 루트는 삭제할 수 없습니다.".to_string());
+    }
+
+    let app_data = app_data_dir(app)?;
+    let servers_root = app_data.join("servers");
+    let protected = [
+        app.path()
+            .home_dir()
+            .map_err(|error| format!("홈 폴더 확인 실패: {error}"))?,
+        app_data,
+        servers_root,
+    ];
+
+    if protected.iter().any(|path| same_path(dir, path)) {
+        return Err("보호된 폴더는 삭제할 수 없습니다.".to_string());
+    }
+
+    Ok(())
+}
+
+fn same_path(left: &Path, right: &Path) -> bool {
+    let left = left.canonicalize().unwrap_or_else(|_| left.to_path_buf());
+    let right = right.canonicalize().unwrap_or_else(|_| right.to_path_buf());
+    left == right
 }

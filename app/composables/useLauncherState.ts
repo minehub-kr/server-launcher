@@ -18,6 +18,7 @@ import {
   type AccessKind,
   type AccessLists,
   type BackupInfo,
+  type DeleteProfileResult,
   type InstalledPlugin,
   type JavaRuntime,
   type MinecraftIdentity,
@@ -86,6 +87,14 @@ const call = async <T,>(command: string, args?: Record<string, unknown>) => {
     const index = mockProfiles.findIndex((item) => item.id === profile.id)
     if (index >= 0) mockProfiles[index] = cloneProfile(profile)
     return profile as T
+  }
+  if (command === 'delete_profile') {
+    const profileId = String(args?.profileId || '')
+    if (mockRuntimeStatus.currentProfileId === profileId) throw new Error('실행 중인 프로필은 삭제할 수 없습니다.')
+    const index = mockProfiles.findIndex((profile) => profile.id === profileId)
+    if (index < 0) throw new Error('프로필을 찾지 못했습니다.')
+    mockProfiles.splice(index, 1)
+    return { profiles: mockProfiles, fileDeleteError: null } as T
   }
   if (command === 'resolve_server_plan') {
     const profile = mockProfiles.find((item) => item.id === args?.profileId)
@@ -165,6 +174,8 @@ export const useLauncherState = () => {
   const mainTab = ref<MainTab>('console')
   const appSettingsOpen = ref(false)
   const newProfileOpen = ref(false)
+  const profileDeleteOpen = ref(false)
+  const deleteProfileFiles = ref(false)
   const versionLoading = ref(false)
   const createVersionLoading = ref(false)
   const logQuery = ref('')
@@ -225,6 +236,10 @@ export const useLauncherState = () => {
 
   const notifyError = (title: string, description?: string) => {
     toast.add({ title, description, color: 'error', icon: 'i-lucide-circle-alert' })
+  }
+
+  const notifyWarning = (title: string, description?: string) => {
+    toast.add({ title, description, color: 'warning', icon: 'i-lucide-triangle-alert' })
   }
 
   const setError = (error: unknown) => {
@@ -374,6 +389,17 @@ export const useLauncherState = () => {
     newProfileOpen.value = false
   }
 
+  const openDeleteProfileDialog = () => {
+    if (!selectedProfile.value) return
+    deleteProfileFiles.value = false
+    profileDeleteOpen.value = true
+  }
+
+  const closeDeleteProfileDialog = () => {
+    profileDeleteOpen.value = false
+    deleteProfileFiles.value = false
+  }
+
   const createProfile = async () => runTask('create-profile', async () => {
     if (!newProfile.value.minecraftVersion) await loadVersions(newProfile.value.kind, true)
     if (!newProfile.value.minecraftVersion) throw new Error('선택 가능한 Minecraft 버전이 없습니다.')
@@ -391,6 +417,25 @@ export const useLauncherState = () => {
     const index = profiles.value.findIndex((profile) => profile.id === saved.id)
     if (index >= 0) profiles.value[index] = cloneProfile(saved)
     notifySuccess('프로필 설정을 저장했습니다.')
+    await refreshProfileData()
+  })
+
+  const deleteProfile = async () => runTask('delete-profile', async () => {
+    const profile = selectedProfile.value
+    if (!profile) return
+    if (activeProfileRunning.value) throw new Error('실행 중인 프로필은 삭제할 수 없습니다.')
+
+    const result = await call<DeleteProfileResult>('delete_profile', {
+      profileId: profile.id,
+      deleteFiles: deleteProfileFiles.value
+    })
+    profiles.value = result.profiles
+    selectedProfileId.value = profiles.value[0]?.id || ''
+    closeDeleteProfileDialog()
+    notifySuccess('프로필을 삭제했습니다.')
+    if (result.fileDeleteError) {
+      notifyWarning('프로필은 삭제했지만 서버 폴더는 남았습니다.', result.fileDeleteError)
+    }
     await refreshProfileData()
   })
 
@@ -661,6 +706,8 @@ export const useLauncherState = () => {
     mainTab,
     appSettingsOpen,
     newProfileOpen,
+    profileDeleteOpen,
+    deleteProfileFiles,
     versionLoading,
     createVersionLoading,
     logQuery,
@@ -699,6 +746,7 @@ export const useLauncherState = () => {
     profileRuntimeStatus,
     notifySuccess,
     notifyError,
+    notifyWarning,
     refreshProfileData,
     refreshConfig,
     refreshAccessLists,
@@ -707,8 +755,11 @@ export const useLauncherState = () => {
     resetNewProfile,
     openNewProfileModal,
     closeNewProfileModal,
+    openDeleteProfileDialog,
+    closeDeleteProfileDialog,
     createProfile,
     saveProfile,
+    deleteProfile,
     saveConfig,
     toggleServer,
     sendCommand,

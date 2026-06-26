@@ -170,6 +170,11 @@ export type BackupInfo = {
   size: number
 }
 
+export type DeleteProfileResult = {
+  profiles: ServerProfile[]
+  fileDeleteError: string | null
+}
+
 export const defaultProperties = (): ServerProperties => ({
   serverPort: 25565,
   onlineMode: true,

@@ -52,6 +52,7 @@ provideLauncher(launcher)
 
       <NewProfileModal />
       <PlayerActionDialog />
+      <ProfileDeleteDialog />
     </div>
   </main>
 </template>

@@ -18,6 +18,7 @@ pub fn run() {
             settings::list_profiles,
             settings::create_profile,
             settings::update_profile,
+            settings::delete_profile,
             settings::choose_server_directory,
             java::scan_java_versions,
             versions::resolve_server_plan,

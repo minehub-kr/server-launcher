@@ -72,6 +72,23 @@ const setFieldValue = (field: ConfigFormField, value: unknown) => {
           </UButton>
         </div>
       </div>
+
+      <div class="panel p-4">
+        <div class="mb-3">
+          <h3 class="text-sm font-semibold text-highlighted">위험 작업</h3>
+          <p class="mt-1 text-xs text-muted">프로필을 삭제해도 기본적으로 서버 폴더와 월드는 보존됩니다.</p>
+        </div>
+        <UButton
+          color="error"
+          variant="subtle"
+          icon="i-lucide-trash"
+          :disabled="!launcher.selectedProfile || launcher.activeProfileRunning"
+          @click="launcher.openDeleteProfileDialog"
+        >
+          프로필 삭제
+        </UButton>
+        <p v-if="launcher.activeProfileRunning" class="mt-2 text-xs text-muted">실행 중인 프로필은 중지한 뒤 삭제할 수 있습니다.</p>
+      </div>
     </div>
 
     <div class="space-y-4">
