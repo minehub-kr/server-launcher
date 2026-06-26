@@ -1,10 +1,9 @@
 # Minehub Server Launcher
 
-Tauri 기반 Minecraft 서버 실행기입니다. Vue/Nuxt UI로 데스크톱 UI를 구성하고, Rust 백엔드에서 서버 다운로드, 실행, 설정 파일 관리, 콘솔 명령, 플러그인 설치 같은 운영 기능을 처리합니다.
+Tauri 기반 Minecraft 서버 실행기입니다. Rust 백엔드에서 서버 다운로드, 실행, 설정 파일 관리, 콘솔 명령, 플러그인 설치 같은 운영 기능을 처리합니다.
 
-- 앱 이름: `Minehub Server Launcher`
-- 패키지 이름: `minehub-server-launcher`
-- Tauri identifier: `kr.minehub.mclauncher`
+
+<img width="1392" height="932" alt="Demo Screenshot" src="https://github.com/user-attachments/assets/5ee0ecba-bf5f-4df0-8039-7d476d96c7cf" />
 
 ## 주요 기능
 
