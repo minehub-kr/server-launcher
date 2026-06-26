@@ -6,7 +6,7 @@
     "dev": "nuxt dev --host 127.0.0.1 --port 3000",
     "generate": "nuxt generate",
     "build": "nuxt build",
-    "typecheck": "vue-tsc --noEmit",
+    "typecheck": "nuxt typecheck",
     "tauri": "tauri",
     "tauri:dev": "nuxt cleanup && tauri dev",
     "tauri:build": "tauri build"
