@@ -5,6 +5,9 @@ description = "Minecraft server launcher"
 authors = ["Codex"]
 edition = "2021"
 
+[package.metadata.tauri-winres]
+OriginalFilename = "minehub-server-launcher.exe"
+
 [lib]
 name = "mc_launcher_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
