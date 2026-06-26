@@ -2,6 +2,11 @@
 import { useLauncher } from '~/composables/useLauncherState'
 
 const launcher = useLauncher()
+const playerHeadUrl = (player: string) => `https://mc-heads.net/avatar/${encodeURIComponent(player)}/40`
+const playerInitials = (player: string) => player.slice(0, 2).toUpperCase()
+const hideBrokenHead = (event: Event) => {
+  if (event.target instanceof HTMLImageElement) event.target.style.display = 'none'
+}
 </script>
 
 <template>
@@ -27,7 +32,16 @@ const launcher = useLauncher()
     <div class="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
       <div v-for="player in launcher.status.players" :key="player" class="player-row">
         <div class="flex min-w-0 items-center gap-3">
-          <span class="avatar shrink-0">{{ player.slice(0, 2).toUpperCase() }}</span>
+          <span class="avatar player-head shrink-0">
+            <span class="player-initials">{{ playerInitials(player) }}</span>
+            <img
+              :src="playerHeadUrl(player)"
+              :alt="`${player} 머리`"
+              loading="lazy"
+              decoding="async"
+              @error="hideBrokenHead"
+            >
+          </span>
           <span class="truncate text-sm font-medium text-highlighted">{{ player }}</span>
         </div>
         <UButton
