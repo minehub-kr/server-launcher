@@ -7,7 +7,16 @@ provideLauncher(launcher)
 
 <template>
   <main class="app-shell h-[100dvh] overflow-hidden">
-    <div class="app-frame mx-auto grid h-full max-w-[1540px] grid-cols-[340px_minmax(0,1fr)] overflow-hidden">
+    <section v-if="!launcher.profilesLoaded" class="grid h-full place-items-center">
+      <div class="text-center">
+        <UIcon name="i-lucide-loader-circle" class="mx-auto size-8 animate-spin text-muted" />
+        <p class="mt-3 text-sm text-muted">프로필을 확인하는 중입니다.</p>
+      </div>
+    </section>
+
+    <OnboardingPage v-else-if="launcher.needsOnboarding" />
+
+    <div v-else class="app-frame mx-auto grid h-full max-w-[1540px] grid-cols-[340px_minmax(0,1fr)] overflow-hidden">
       <ProfileSidebar />
 
       <section class="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
@@ -40,9 +49,9 @@ provideLauncher(launcher)
           <BackupTab v-else-if="launcher.mainTab === 'backup'" />
         </div>
       </section>
-    </div>
 
-    <NewProfileModal />
-    <PlayerActionDialog />
+      <NewProfileModal />
+      <PlayerActionDialog />
+    </div>
   </main>
 </template>

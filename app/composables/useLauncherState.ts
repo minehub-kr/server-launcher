@@ -150,6 +150,7 @@ export const useLauncherState = () => {
   const colorMode = useColorMode() as unknown as { preference: ThemeMode }
   const toast = useToast()
   const profiles = ref<ServerProfile[]>([])
+  const profilesLoaded = ref(false)
   const selectedProfileId = ref('')
   const profileDraft = ref<ServerProfile | null>(null)
   const versions = ref<ServerVersion[]>([])
@@ -194,6 +195,7 @@ export const useLauncherState = () => {
   let createVersionRequestId = 0
 
   const selectedProfile = computed(() => profiles.value.find((profile) => profile.id === selectedProfileId.value) || null)
+  const needsOnboarding = computed(() => profilesLoaded.value && profiles.value.length === 0)
   const activeProfileRunning = computed(() => status.value.running && status.value.currentProfileId === selectedProfileId.value)
   const anyServerRunning = computed(() => status.value.running)
   const canUsePlugins = computed(() => !!selectedProfile.value && selectedProfile.value.kind !== 'vanilla')
@@ -293,9 +295,13 @@ export const useLauncherState = () => {
   }
 
   const refreshProfiles = async () => {
-    profiles.value = await call<ServerProfile[]>('list_profiles')
-    if (!selectedProfileId.value || !profiles.value.some((profile) => profile.id === selectedProfileId.value)) {
-      selectedProfileId.value = profiles.value[0]?.id || ''
+    try {
+      profiles.value = await call<ServerProfile[]>('list_profiles')
+      if (!selectedProfileId.value || !profiles.value.some((profile) => profile.id === selectedProfileId.value)) {
+        selectedProfileId.value = profiles.value[0]?.id || ''
+      }
+    } finally {
+      profilesLoaded.value = true
     }
   }
 
@@ -640,6 +646,7 @@ export const useLauncherState = () => {
   return reactive({
     colorMode,
     profiles,
+    profilesLoaded,
     selectedProfileId,
     profileDraft,
     versions,
@@ -671,6 +678,7 @@ export const useLauncherState = () => {
     accessRawOpen,
     newProfile,
     selectedProfile,
+    needsOnboarding,
     activeProfileRunning,
     anyServerRunning,
     canUsePlugins,
