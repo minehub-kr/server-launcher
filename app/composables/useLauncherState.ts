@@ -235,6 +235,7 @@ export const useLauncherState = () => {
   const eulaDialogOpen = ref(false)
   const eulaAgreementChecked = ref(false)
   const network = ref<NetworkDiagnostics | null>(null)
+  const networkAutoRefreshing = ref(false)
   const metrics = ref<SystemMetrics | null>(null)
   const metricHistory = ref<MetricPoint[]>([])
   const config = ref<ServerConfigBundle | null>(null)
@@ -271,6 +272,7 @@ export const useLauncherState = () => {
   const newProfile = ref(defaultNewProfile())
 
   let pollTimer: ReturnType<typeof setInterval> | undefined
+  let networkTimer: ReturnType<typeof setInterval> | undefined
   let metricsTimer: ReturnType<typeof setInterval> | undefined
   const unlisteners: UnlistenFn[] = []
   let versionRequestId = 0
@@ -422,6 +424,18 @@ export const useLauncherState = () => {
   }
 
   const refreshNetworkDiagnostics = async () => runTask('network-diagnostics', loadNetworkDiagnostics)
+
+  const refreshNetworkDiagnosticsInBackground = async () => {
+    if (!selectedProfile.value || networkAutoRefreshing.value || loading.value === 'network-diagnostics') return
+    networkAutoRefreshing.value = true
+    try {
+      await loadNetworkDiagnostics()
+    } catch {
+      network.value = null
+    } finally {
+      networkAutoRefreshing.value = false
+    }
+  }
 
   const openUpnpPort = async () => runTask('upnp', async () => {
     if (!selectedProfile.value) return
@@ -829,6 +843,9 @@ export const useLauncherState = () => {
       ])
       await refreshProfileData()
       pollTimer = setInterval(refreshStatus, 10000)
+      networkTimer = setInterval(() => {
+        refreshNetworkDiagnosticsInBackground().catch(() => {})
+      }, 30000)
       metricsTimer = setInterval(() => {
         refreshSystemMetrics().catch(() => {})
       }, 3000)
@@ -839,6 +856,7 @@ export const useLauncherState = () => {
 
   onBeforeUnmount(() => {
     if (pollTimer) clearInterval(pollTimer)
+    if (networkTimer) clearInterval(networkTimer)
     if (metricsTimer) clearInterval(metricsTimer)
     for (const unlisten of unlisteners) unlisten()
   })
@@ -858,6 +876,7 @@ export const useLauncherState = () => {
     eulaDialogOpen,
     eulaAgreementChecked,
     network,
+    networkAutoRefreshing,
     metrics,
     metricHistory,
     config,

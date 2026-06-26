@@ -222,7 +222,7 @@ pub async fn open_upnp_port(
                 port,
                 SocketAddrV4::new(local_ip, port),
                 0,
-                "Minehub Minecraft Server",
+                "Minehub Server Launcher",
             )
             .map_err(|error| format!("UPnP 포트 매핑 실패: {error}"))?;
         let external_address = gateway.get_external_ip().ok().map(|ip| ip.to_string());

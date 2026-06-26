@@ -17,6 +17,14 @@ const chartPoints = (values: number[]) => {
 const cpuPoints = computed(() => chartPoints(launcher.metricHistory.map((point) => point.cpuUsage)))
 const memoryPoints = computed(() => chartPoints(launcher.metricHistory.map((point) => point.memoryUsage)))
 const latestMetricLabel = computed(() => launcher.metricHistory.at(-1)?.label || '수집 중')
+const networkCheckedLabel = computed(() => launcher.network?.checkedAt
+  ? new Date(launcher.network.checkedAt * 1000).toLocaleTimeString('ko-KR', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    })
+  : '확인 전')
 const memoryText = computed(() => {
   const metrics = launcher.metrics
   return metrics ? `${metrics.memoryUsedMb.toLocaleString()} / ${metrics.memoryTotalMb.toLocaleString()} MB` : '-'
@@ -74,7 +82,8 @@ watch(
             size="sm"
             color="neutral"
             variant="subtle"
-            icon="i-lucide-refresh-cw"
+            :icon="launcher.networkAutoRefreshing ? 'i-lucide-loader-circle' : 'i-lucide-refresh-cw'"
+            :class="{ 'animate-spin': launcher.networkAutoRefreshing }"
             :loading="launcher.loading === 'network-diagnostics'"
             :disabled="!launcher.selectedProfile"
             @click="launcher.refreshNetworkDiagnostics"
