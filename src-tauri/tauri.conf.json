@@ -1,7 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Minehub Server Launcher",
-  "version": "0.1.0",
   "identifier": "kr.minehub.mclauncher",
   "build": {
     "beforeDevCommand": "pnpm dev",
@@ -26,7 +25,21 @@
   },
   "bundle": {
     "active": false,
+    "createUpdaterArtifacts": true,
     "targets": "all",
     "icon": ["icons/icon.png", "icons/icon.ico"]
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "dialog": false,
+      "endpoints": [
+        "https://github.com/minehub-kr/server-launcher/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IENFOEZDQzBFRTdBRDlGOTEKUldTUm42M25Ec3lQemhYVGhmTXlIT1QveGRrK05FTnRhOWdqWUdtRE5iZkNmSE1lSVFvMXhkVzgK",
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

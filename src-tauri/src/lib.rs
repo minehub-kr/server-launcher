@@ -6,12 +6,14 @@ mod plugins;
 mod runtime;
 mod settings;
 mod system;
+mod updater;
 mod versions;
 
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::default().build())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(models::AppState::default())
         .invoke_handler(tauri::generate_handler![
             versions::list_server_versions,
@@ -41,7 +43,10 @@ pub fn run() {
             system::open_server_path,
             system::network_diagnostics,
             system::open_upnp_port,
-            system::system_metrics
+            system::system_metrics,
+            updater::check_for_update,
+            updater::download_and_install_update,
+            updater::current_app_version
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -10,11 +10,21 @@ const launcher = useLauncher()
       <div class="flex items-center justify-between gap-3">
         <div>
           <h1 class="text-xl font-semibold tracking-normal text-highlighted">Minehub Server Launcher</h1>
-          <p class="mt-1 text-xs text-muted">멀티 프로필 서버 운영 도구</p>
+          <div class="mt-1 flex flex-wrap items-center gap-2">
+            <p class="text-xs text-muted">멀티 프로필 서버 운영 도구</p>
+            <UBadge color="neutral" variant="outline" :title="`Minehub Server Launcher v${launcher.appVersion || launcher.appUpdate?.currentVersion || 'dev'}`">
+              v{{ launcher.appVersion || launcher.appUpdate?.currentVersion || 'dev' }}
+            </UBadge>
+          </div>
         </div>
-        <UBadge :color="launcher.statusColor(launcher.status.status)" variant="soft">
-          {{ launcher.statusLabel(launcher.status.status) }}
-        </UBadge>
+        <div class="flex flex-col items-end gap-2">
+          <UBadge :color="launcher.statusColor(launcher.status.status)" variant="soft">
+            {{ launcher.statusLabel(launcher.status.status) }}
+          </UBadge>
+          <UBadge v-if="launcher.appUpdate?.available && launcher.appUpdate.version" color="primary" variant="soft" icon="i-lucide-sparkles">
+            업데이트 {{ launcher.appUpdate.version }}
+          </UBadge>
+        </div>
       </div>
     </div>
 

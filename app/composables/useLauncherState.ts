@@ -17,6 +17,7 @@ import {
   themeOptions,
   type AccessKind,
   type AccessLists,
+  type AppUpdateInfo,
   type BackupInfo,
   type DeleteProfileResult,
   type EulaStatus,
@@ -38,6 +39,7 @@ import {
   type ServerVersion,
   type SystemMetrics,
   type ThemeMode,
+  type UpdateProgressEvent,
   type UpnpMappingResult
 } from '~/types/launcher'
 
@@ -216,6 +218,16 @@ const call = async <T,>(command: string, args?: Record<string, unknown>) => {
   if (command === 'install_modrinth_plugin') return { filename: 'plugin.jar' } as T
   if (command === 'create_backup') return { filename: 'backup.zip', path: '/tmp/backup.zip', size: 0 } as T
   if (command === 'open_server_path') return undefined as T
+  if (command === 'current_app_version') return 'dev' as T
+  if (command === 'check_for_update') {
+    return {
+      available: false,
+      currentVersion: 'dev',
+      version: null,
+      notes: null,
+      pubDate: null
+    } as T
+  }
   throw new Error('Tauri 앱에서 사용할 수 있는 기능입니다.')
 }
 
@@ -254,6 +266,7 @@ export const useLauncherState = () => {
   const pluginQuery = ref('')
   const loading = ref('')
   const backupInfo = ref<BackupInfo | null>(null)
+  const appVersion = ref('')
   const playerActionOpen = ref(false)
   const selectedPlayerName = ref('')
   const playerAction = ref<PlayerAction>('kick')
@@ -270,6 +283,11 @@ export const useLauncherState = () => {
     memoryMb: 4096
   })
   const newProfile = ref(defaultNewProfile())
+  const appUpdate = ref<AppUpdateInfo | null>(null)
+  const appUpdateDismissed = ref(false)
+  const appUpdateProgress = ref(0)
+  const appUpdateProgressLabel = ref('')
+  const appUpdateInstalling = ref(false)
 
   let pollTimer: ReturnType<typeof setInterval> | undefined
   let networkTimer: ReturnType<typeof setInterval> | undefined
@@ -277,6 +295,7 @@ export const useLauncherState = () => {
   const unlisteners: UnlistenFn[] = []
   let versionRequestId = 0
   let createVersionRequestId = 0
+  let appUpdateDownloadedBytes = 0
 
   const selectedProfile = computed(() => profiles.value.find((profile) => profile.id === selectedProfileId.value) || null)
   const needsOnboarding = computed(() => profilesLoaded.value && profiles.value.length === 0)
@@ -806,6 +825,41 @@ export const useLauncherState = () => {
     mainTab.value = 'settings'
   }
 
+  const fetchAppUpdate = async () => {
+    const info = await call<AppUpdateInfo>('check_for_update')
+    appUpdate.value = info
+    appVersion.value = info.currentVersion
+    if (!info.available) appUpdateDismissed.value = false
+  }
+
+  const checkForAppUpdate = async (silent = false) => {
+    if (silent) {
+      try {
+        await fetchAppUpdate()
+      } catch {
+        appUpdate.value = null
+      }
+      return
+    }
+    return runTask('update-check', fetchAppUpdate)
+  }
+
+  const dismissAppUpdate = () => {
+    appUpdateDismissed.value = true
+  }
+
+  const installAppUpdate = async () => runTask('update-install', async () => {
+    appUpdateProgress.value = 0
+    appUpdateDownloadedBytes = 0
+    appUpdateProgressLabel.value = '업데이트를 다운로드하는 중입니다.'
+    const installed = await call<boolean>('download_and_install_update')
+    if (installed) {
+      appUpdateInstalling.value = true
+      appUpdateProgressLabel.value = '업데이트 설치 준비가 완료되었습니다. 앱을 다시 시작하세요.'
+      notifySuccess('업데이트가 준비되었습니다.', '앱을 다시 시작하면 새 버전이 적용됩니다.')
+    }
+  })
+
   const bindRuntimeEvents = async () => {
     if (!isTauri()) return
     unlisteners.push(await listen<ServerLogEvent>('server-log', (event) => pushRuntimeLog(event.payload.line)))
@@ -817,6 +871,21 @@ export const useLauncherState = () => {
         await refreshConfig()
         loadNetworkDiagnostics().catch(() => { network.value = null })
       }
+    }))
+    unlisteners.push(await listen<UpdateProgressEvent>('updater-progress', (event) => {
+      const { chunkLength, contentLength } = event.payload
+      appUpdateDownloadedBytes += chunkLength
+      if (contentLength && contentLength > 0) {
+        const received = Math.min(contentLength, appUpdateDownloadedBytes)
+        appUpdateProgress.value = Math.min(1, received / contentLength)
+        appUpdateProgressLabel.value = `업데이트를 다운로드하는 중입니다. (${Math.round(appUpdateProgress.value * 100)}%)`
+      } else {
+        appUpdateProgressLabel.value = `업데이트를 다운로드하는 중입니다. (${appUpdateDownloadedBytes} 바이트)`
+      }
+    }))
+    unlisteners.push(await listen<boolean>('updater-installing', (event) => {
+      appUpdateInstalling.value = event.payload
+      if (event.payload) appUpdateProgressLabel.value = '업데이트를 설치하는 중입니다.'
     }))
   }
 
@@ -838,6 +907,7 @@ export const useLauncherState = () => {
         refreshProfiles(),
         loadVersions(newProfile.value.kind, true),
         call<JavaRuntime[]>('scan_java_versions').then((result) => { javaVersions.value = result }),
+        call<string>('current_app_version').then((result) => { appVersion.value = result }),
         refreshStatus(),
         refreshSystemMetrics()
       ])
@@ -849,6 +919,7 @@ export const useLauncherState = () => {
       metricsTimer = setInterval(() => {
         refreshSystemMetrics().catch(() => {})
       }, 3000)
+      checkForAppUpdate(true)
     } catch (error) {
       setError(error)
     }
@@ -895,6 +966,7 @@ export const useLauncherState = () => {
     pluginQuery,
     loading,
     backupInfo,
+    appVersion,
     playerActionOpen,
     selectedPlayerName,
     playerAction,
@@ -904,6 +976,11 @@ export const useLauncherState = () => {
     banReason,
     accessRawOpen,
     newProfile,
+    appUpdate,
+    appUpdateDismissed,
+    appUpdateProgress,
+    appUpdateProgressLabel,
+    appUpdateInstalling,
     selectedProfile,
     needsOnboarding,
     activeProfileRunning,
@@ -962,7 +1039,10 @@ export const useLauncherState = () => {
     setWhitelistEnabled,
     createBackup,
     openPath,
-    goToSettings
+    goToSettings,
+    checkForAppUpdate,
+    dismissAppUpdate,
+    installAppUpdate
   })
 }
 

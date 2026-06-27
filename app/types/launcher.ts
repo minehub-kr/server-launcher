@@ -214,6 +214,19 @@ export type DeleteProfileResult = {
   fileDeleteError: string | null
 }
 
+export type AppUpdateInfo = {
+  available: boolean
+  currentVersion: string
+  version: string | null
+  notes: string | null
+  pubDate: string | null
+}
+
+export type UpdateProgressEvent = {
+  chunkLength: number
+  contentLength: number | null
+}
+
 export const defaultProperties = (): ServerProperties => ({
   serverPort: 25565,
   onlineMode: true,

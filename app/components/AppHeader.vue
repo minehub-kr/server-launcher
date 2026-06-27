@@ -51,6 +51,25 @@ const launcher = useLauncher()
             {{ mode.label }}
           </UButton>
         </div>
+        <UDivider class="my-3" />
+        <div class="grid gap-2">
+          <UButton
+            color="neutral"
+            variant="subtle"
+            icon="i-lucide-refresh-cw"
+            :loading="launcher.loading === 'update-check'"
+            block
+            @click="launcher.checkForAppUpdate()"
+          >
+            업데이트 확인
+          </UButton>
+          <p v-if="launcher.appUpdate?.available && launcher.appUpdate.version" class="text-xs text-muted">
+            새 버전 {{ launcher.appUpdate.version }}이(가) 있습니다.
+          </p>
+          <p v-else-if="launcher.appUpdate" class="text-xs text-muted">
+            최신 버전(v{{ launcher.appUpdate.currentVersion }})을 사용 중입니다.
+          </p>
+        </div>
       </div>
     </div>
   </header>

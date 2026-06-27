@@ -22,7 +22,8 @@ provideLauncher(launcher)
       <section class="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
         <AppHeader />
 
-        <div class="px-5 pt-4">
+        <div class="px-5 pt-4 space-y-2">
+          <UpdateNotice />
           <UAlert
             v-if="launcher.status.status === 'crashed'"
             color="error"
