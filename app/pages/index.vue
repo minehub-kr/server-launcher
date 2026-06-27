@@ -16,7 +16,7 @@ provideLauncher(launcher)
 
     <OnboardingPage v-else-if="launcher.needsOnboarding" />
 
-    <div v-else class="app-frame mx-auto grid h-full max-w-[1540px] grid-cols-[340px_minmax(0,1fr)] overflow-hidden">
+    <div v-else class="app-frame grid h-full w-full grid-cols-[340px_minmax(0,1fr)] overflow-hidden">
       <ProfileSidebar />
 
       <section class="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
