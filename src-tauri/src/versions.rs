@@ -6,7 +6,8 @@ use crate::{
     },
     settings::find_profile,
     system::{
-        download_file, file_matches_sha1, get_json, get_json_or, stable_mc_version,
+        download_file, download_file_with_sha1, download_file_with_sha256, file_matches_sha1,
+        file_matches_sha256, file_nonempty, get_json, get_json_or, stable_mc_version,
         MINECRAFT_MANIFEST_URL, PAPER_API,
     },
 };
@@ -131,7 +132,7 @@ pub async fn prepare_server_jar(
                 return Ok(path);
             }
 
-            download_file(client, &download.url, &path).await?;
+            download_file_with_sha1(client, &download.url, &path, &download.sha1).await?;
             Ok(path)
         }
         ServerKind::Paper | ServerKind::Folia => {
@@ -143,7 +144,11 @@ pub async fn prepare_server_jar(
             let file_name = build.downloads.application.name;
             let path = dir.join(&file_name);
 
-            if path.exists() {
+            if let Some(sha256) = build.downloads.application.sha256.as_deref() {
+                if file_matches_sha256(&path, sha256).await {
+                    return Ok(path);
+                }
+            } else if file_nonempty(&path).await {
                 return Ok(path);
             }
 
@@ -151,7 +156,11 @@ pub async fn prepare_server_jar(
                 "{PAPER_API}/projects/{project}/versions/{}/builds/{}/downloads/{}",
                 profile.minecraft_version, build.build, file_name
             );
-            download_file(client, &url, &path).await?;
+            if let Some(sha256) = build.downloads.application.sha256.as_deref() {
+                download_file_with_sha256(client, &url, &path, sha256).await?;
+            } else {
+                download_file(client, &url, &path).await?;
+            }
             Ok(path)
         }
         ServerKind::Purpur => {
@@ -159,7 +168,7 @@ pub async fn prepare_server_jar(
             let file_name = format!("purpur-{}-{build}.jar", profile.minecraft_version);
             let path = dir.join(&file_name);
 
-            if path.exists() {
+            if file_nonempty(&path).await {
                 return Ok(path);
             }
 

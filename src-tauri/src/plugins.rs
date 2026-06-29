@@ -4,7 +4,7 @@ use crate::{
         PluginFile, ServerKind,
     },
     settings::find_profile,
-    system::{download_file, get_json, safe_filename, MODRINTH_API},
+    system::{download_file, download_file_with_sha1, get_json, safe_filename, MODRINTH_API},
 };
 use reqwest::Url;
 use std::path::Path;
@@ -83,7 +83,15 @@ pub async fn install_modrinth_plugin(
         .await
         .map_err(|error| format!("plugins 폴더 생성 실패: {error}"))?;
     let path = plugins_dir.join(&filename);
-    download_file(&state.http, &file.url, &path).await?;
+    if let Some(sha1) = file
+        .hashes
+        .as_ref()
+        .and_then(|hashes| hashes.sha1.as_deref())
+    {
+        download_file_with_sha1(&state.http, &file.url, &path, sha1).await?;
+    } else {
+        download_file(&state.http, &file.url, &path).await?;
+    }
 
     Ok(InstalledPlugin {
         title,

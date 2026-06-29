@@ -63,14 +63,61 @@ pub async fn start_server(
     state: State<'_, AppState>,
     profile_id: String,
 ) -> Result<ServerStatus, String> {
-    {
-        let runtime = state.runtime.lock().await;
-        if runtime.current_profile_id.is_some() {
-            return Err("이미 실행 중인 서버가 있습니다.".to_string());
+    reserve_server_start(&app, &state, &profile_id).await?;
+
+    match start_server_after_reserve(&app, &state, profile_id).await {
+        Ok(status) => Ok(status),
+        Err(error) => {
+            fail_server_start(&app, &state, &error).await;
+            Err(error)
         }
     }
+}
 
-    let mut settings = load_settings(&app).await?;
+async fn reserve_server_start(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    profile_id: &str,
+) -> Result<(), String> {
+    let mut runtime = state.runtime.lock().await;
+    if runtime.current_profile_id.is_some() {
+        return Err("이미 실행 중인 서버가 있습니다.".to_string());
+    }
+
+    runtime.status = "starting".to_string();
+    runtime.players.clear();
+    runtime.logs.clear();
+    runtime.current_profile_id = Some(profile_id.to_string());
+    runtime.java = None;
+    runtime.stdin = None;
+    runtime.crash_detected = false;
+    runtime.exit_message = None;
+    runtime.stop_requested = false;
+    append_and_emit_log(app, &mut runtime, "Preparing server start".to_string());
+    emit_status(app, &runtime);
+    Ok(())
+}
+
+async fn fail_server_start(app: &AppHandle, state: &State<'_, AppState>, error: &str) {
+    let mut runtime = state.runtime.lock().await;
+    runtime.status = "stopped".to_string();
+    runtime.players.clear();
+    runtime.current_profile_id = None;
+    runtime.java = None;
+    runtime.stdin = None;
+    runtime.crash_detected = false;
+    runtime.exit_message = Some(error.to_string());
+    runtime.stop_requested = false;
+    append_and_emit_log(app, &mut runtime, format!("Server start failed: {error}"));
+    emit_status(app, &runtime);
+}
+
+async fn start_server_after_reserve(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    profile_id: String,
+) -> Result<ServerStatus, String> {
+    let mut settings = load_settings(app).await?;
     let index = settings
         .profiles
         .iter()
@@ -105,6 +152,11 @@ pub async fn start_server(
     write_default_properties(&profile, &config.properties).await?;
 
     let jar = prepare_server_jar(&state.http, &profile, &detail).await?;
+    profile.last_used = Some(timestamp().to_string());
+    settings.selected_profile_id = Some(profile.id.clone());
+    settings.profiles[index] = profile.clone();
+    save_settings(app, &settings).await?;
+
     let xms = profile.memory_mb.clamp(512, 1024);
     let xmx = profile.memory_mb.max(512);
     let mut child = Command::new(&java.path)
@@ -127,16 +179,10 @@ pub async fn start_server(
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
 
-    profile.last_used = Some(timestamp().to_string());
-    settings.selected_profile_id = Some(profile.id.clone());
-    settings.profiles[index] = profile.clone();
-    save_settings(&app, &settings).await?;
-
     {
         let mut runtime = state.runtime.lock().await;
         runtime.status = "running".to_string();
         runtime.players.clear();
-        runtime.logs.clear();
         runtime.current_profile_id = Some(profile.id.clone());
         runtime.java = Some(java.clone());
         runtime.stdin = Some(Arc::new(Mutex::new(stdin)));
@@ -144,7 +190,7 @@ pub async fn start_server(
         runtime.exit_message = None;
         runtime.stop_requested = false;
         append_and_emit_log(
-            &app,
+            app,
             &mut runtime,
             format!(
                 "Starting {} {} on port {} with Java {}",
@@ -154,7 +200,7 @@ pub async fn start_server(
                 java.major
             ),
         );
-        emit_status(&app, &runtime);
+        emit_status(app, &runtime);
     }
 
     if let Some(stdout) = stdout {
@@ -196,7 +242,7 @@ pub async fn start_server(
         emit_status(&app_for_exit, &runtime);
     });
 
-    status_snapshot(&app, &state).await
+    status_snapshot(app, state).await
 }
 
 #[tauri::command]
@@ -206,6 +252,12 @@ pub async fn stop_server(
 ) -> Result<ServerStatus, String> {
     {
         let mut runtime = state.runtime.lock().await;
+        if runtime.current_profile_id.is_none() {
+            return Err("실행 중인 서버가 없습니다.".to_string());
+        }
+        if runtime.stdin.is_none() {
+            return Err("서버 시작 준비가 끝난 뒤 중지할 수 있습니다.".to_string());
+        }
         runtime.status = "stopping".to_string();
         runtime.stop_requested = true;
         emit_status(&app, &runtime);

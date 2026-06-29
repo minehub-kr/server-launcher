@@ -214,6 +214,7 @@ pub struct PaperDownloads {
 #[derive(Clone, Deserialize)]
 pub struct PaperFile {
     pub name: String,
+    pub sha256: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -450,6 +451,12 @@ pub struct ModrinthFile {
     pub url: String,
     pub filename: String,
     pub primary: bool,
+    pub hashes: Option<ModrinthHashes>,
+}
+
+#[derive(Clone, Deserialize)]
+pub struct ModrinthHashes {
+    pub sha1: Option<String>,
 }
 
 #[derive(Serialize)]

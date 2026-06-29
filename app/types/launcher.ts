@@ -306,6 +306,7 @@ export const gamemodeOptions = ['survival', 'creative', 'adventure', 'spectator'
 }))
 
 const statusText: Record<string, string> = {
+  starting: '시작 중',
   running: '실행 중',
   stopped: '중지됨',
   stopping: '종료 중',
@@ -314,4 +315,4 @@ const statusText: Record<string, string> = {
 
 export const statusLabel = (value = 'stopped') => statusText[value] || value || '알 수 없음'
 export const statusColor = (value = 'stopped') =>
-  value === 'running' ? 'success' : value === 'crashed' ? 'error' : value === 'stopping' ? 'warning' : 'neutral'
+  value === 'running' ? 'success' : value === 'crashed' ? 'error' : ['starting', 'stopping'].includes(value) ? 'warning' : 'neutral'

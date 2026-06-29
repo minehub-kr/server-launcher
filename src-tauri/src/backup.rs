@@ -5,8 +5,8 @@ use crate::{
 };
 use std::{
     fs::File,
-    io::{Read, Write},
-    path::Path,
+    io::copy,
+    path::{Path, PathBuf},
 };
 use tauri::AppHandle;
 use zip::{write::FileOptions, ZipWriter};
@@ -16,6 +16,9 @@ pub async fn create_backup(app: AppHandle, profile_id: String) -> Result<BackupI
     let profile = find_profile(&app, &profile_id).await?;
     tauri::async_runtime::spawn_blocking(move || {
         let server_dir = std::path::PathBuf::from(&profile.server_dir);
+        let server_root = server_dir
+            .canonicalize()
+            .map_err(|error| format!("서버 폴더 확인 실패: {error}"))?;
         let backup_dir = server_dir.join("backups");
         std::fs::create_dir_all(&backup_dir)
             .map_err(|error| format!("백업 폴더 생성 실패: {error}"))?;
@@ -46,7 +49,7 @@ pub async fn create_backup(app: AppHandle, profile_id: String) -> Result<BackupI
         ] {
             let item_path = server_dir.join(item);
             if item_path.exists() {
-                add_zip_entry(&mut zip, &server_dir, &item_path, options)?;
+                add_zip_entry(&mut zip, &server_dir, &server_root, &item_path, options)?;
             }
         }
 
@@ -69,19 +72,27 @@ pub async fn create_backup(app: AppHandle, profile_id: String) -> Result<BackupI
 fn add_zip_entry(
     zip: &mut ZipWriter<File>,
     base: &Path,
+    base_canonical: &Path,
     path: &Path,
     options: FileOptions,
 ) -> Result<(), String> {
-    if path.is_dir() {
+    let metadata = std::fs::symlink_metadata(path)
+        .map_err(|error| format!("백업 항목 메타데이터 확인 실패: {error}"))?;
+    if metadata.file_type().is_symlink() {
+        return Ok(());
+    }
+
+    if metadata.is_dir() {
         for entry in
             std::fs::read_dir(path).map_err(|error| format!("백업 폴더 읽기 실패: {error}"))?
         {
             let entry = entry.map_err(|error| format!("백업 항목 읽기 실패: {error}"))?;
-            add_zip_entry(zip, base, &entry.path(), options)?;
+            add_zip_entry(zip, base, base_canonical, &entry.path(), options)?;
         }
         return Ok(());
     }
 
+    ensure_inside_base(base_canonical, path)?;
     let relative = path
         .strip_prefix(base)
         .map_err(|error| format!("백업 상대 경로 계산 실패: {error}"))?
@@ -90,9 +101,25 @@ fn add_zip_entry(
     zip.start_file(relative, options)
         .map_err(|error| format!("zip 항목 생성 실패: {error}"))?;
     let mut file = File::open(path).map_err(|error| format!("백업 파일 열기 실패: {error}"))?;
-    let mut buffer = Vec::new();
-    file.read_to_end(&mut buffer)
-        .map_err(|error| format!("백업 파일 읽기 실패: {error}"))?;
-    zip.write_all(&buffer)
+    copy(&mut file, zip)
         .map_err(|error| format!("zip 파일 쓰기 실패: {error}"))
+        .map(|_| ())
+}
+
+fn ensure_inside_base(base: &Path, path: &Path) -> Result<(), String> {
+    let canonical = path
+        .canonicalize()
+        .map_err(|error| format!("백업 항목 경로 확인 실패: {error}"))?;
+    if canonical.starts_with(base) {
+        Ok(())
+    } else {
+        Err(format!(
+            "서버 폴더 밖의 파일은 백업하지 않습니다: {}",
+            display_path(path)
+        ))
+    }
+}
+
+fn display_path(path: &Path) -> String {
+    PathBuf::from(path).to_string_lossy().to_string()
 }

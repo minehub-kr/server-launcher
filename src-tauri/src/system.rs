@@ -1,9 +1,11 @@
 use reqwest::Client;
 use serde::Deserialize;
 use sha1::{Digest, Sha1};
+use sha2::Sha256;
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener, UdpSocket},
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
     time::{SystemTime, UNIX_EPOCH},
 };
 use tauri::{AppHandle, Manager, State};
@@ -19,6 +21,8 @@ pub const MINECRAFT_MANIFEST_URL: &str =
     "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
 pub const MODRINTH_API: &str = "https://api.modrinth.com/v2";
 pub const PAPER_API: &str = "https://api.papermc.io/v2";
+
+static UNIQUE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub async fn get_json<T: for<'de> Deserialize<'de>>(
     client: &Client,
@@ -51,12 +55,37 @@ pub async fn get_json_or<T: for<'de> Deserialize<'de>>(
 }
 
 pub async fn download_file(client: &Client, url: &str, path: &Path) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .await
-            .map_err(|error| format!("다운로드 폴더 생성 실패: {error}"))?;
-    }
+    let bytes = download_bytes(client, url).await?;
+    write_file_atomic(path, &bytes).await
+}
 
+pub async fn download_file_with_sha1(
+    client: &Client,
+    url: &str,
+    path: &Path,
+    expected_sha1: &str,
+) -> Result<(), String> {
+    let bytes = download_bytes(client, url).await?;
+    if !sha1_matches(&bytes, expected_sha1) {
+        return Err("다운로드한 파일의 SHA1 해시가 일치하지 않습니다.".to_string());
+    }
+    write_file_atomic(path, &bytes).await
+}
+
+pub async fn download_file_with_sha256(
+    client: &Client,
+    url: &str,
+    path: &Path,
+    expected_sha256: &str,
+) -> Result<(), String> {
+    let bytes = download_bytes(client, url).await?;
+    if !sha256_matches(&bytes, expected_sha256) {
+        return Err("다운로드한 파일의 SHA256 해시가 일치하지 않습니다.".to_string());
+    }
+    write_file_atomic(path, &bytes).await
+}
+
+async fn download_bytes(client: &Client, url: &str) -> Result<Vec<u8>, String> {
     let bytes = client
         .get(url)
         .send()
@@ -67,18 +96,76 @@ pub async fn download_file(client: &Client, url: &str, path: &Path) -> Result<()
         .bytes()
         .await
         .map_err(|error| format!("다운로드 읽기 실패: {error}"))?;
-    fs::write(path, &bytes)
+    if bytes.is_empty() {
+        return Err("다운로드한 파일이 비어 있습니다.".to_string());
+    }
+    Ok(bytes.to_vec())
+}
+
+pub async fn write_file_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .await
+            .map_err(|error| format!("파일 폴더 생성 실패: {error}"))?;
+    }
+
+    let temp = temporary_file_path(path);
+    fs::write(&temp, bytes)
         .await
-        .map_err(|error| format!("파일 저장 실패: {error}"))
+        .map_err(|error| format!("임시 파일 저장 실패: {error}"))?;
+
+    if let Err(first_error) = fs::rename(&temp, path).await {
+        if path.exists() {
+            fs::remove_file(path)
+                .await
+                .map_err(|error| format!("기존 파일 교체 준비 실패: {error}"))?;
+        }
+        fs::rename(&temp, path)
+            .await
+            .map_err(|error| format!("파일 교체 실패: {error}; 최초 오류: {first_error}"))?;
+    }
+
+    Ok(())
 }
 
 pub async fn file_matches_sha1(path: &Path, expected: &str) -> bool {
     let Ok(bytes) = fs::read(path).await else {
         return false;
     };
+    sha1_matches(&bytes, expected)
+}
+
+pub async fn file_matches_sha256(path: &Path, expected: &str) -> bool {
+    let Ok(bytes) = fs::read(path).await else {
+        return false;
+    };
+    sha256_matches(&bytes, expected)
+}
+
+pub async fn file_nonempty(path: &Path) -> bool {
+    fs::metadata(path)
+        .await
+        .is_ok_and(|metadata| metadata.is_file() && metadata.len() > 0)
+}
+
+fn sha1_matches(bytes: &[u8], expected: &str) -> bool {
     let mut hasher = Sha1::new();
     hasher.update(bytes);
     format!("{:x}", hasher.finalize()).eq_ignore_ascii_case(expected)
+}
+
+fn sha256_matches(bytes: &[u8], expected: &str) -> bool {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    format!("{:x}", hasher.finalize()).eq_ignore_ascii_case(expected)
+}
+
+fn temporary_file_path(path: &Path) -> PathBuf {
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("download");
+    path.with_file_name(format!(".{name}.{}.tmp", unique_suffix()))
 }
 
 pub fn port_available(port: u16) -> bool {
@@ -134,6 +221,22 @@ pub fn timestamp() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or_default()
+}
+
+pub fn timestamp_millis() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or_default()
+}
+
+pub fn unique_id(prefix: &str) -> String {
+    format!("{prefix}-{}", unique_suffix())
+}
+
+fn unique_suffix() -> String {
+    let counter = UNIQUE_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("{}-{counter}", timestamp_millis())
 }
 
 pub fn sanitize_name(name: &str) -> String {

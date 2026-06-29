@@ -1,6 +1,6 @@
 use crate::{
     models::{AppSettings, AppState, CreateProfileInput, ServerProfile, ServerProperties},
-    system::{app_data_dir, default_profile_dir, timestamp},
+    system::{app_data_dir, default_profile_dir, unique_id, write_file_atomic},
 };
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -26,7 +26,7 @@ pub async fn create_profile(
     input: CreateProfileInput,
 ) -> Result<ServerProfile, String> {
     let mut settings = load_settings(&app).await?;
-    let id = format!("profile-{}", timestamp());
+    let id = next_profile_id(&settings);
     let server_dir = match input.server_dir {
         Some(path) if !path.trim().is_empty() => path,
         _ => default_profile_dir(&app, &id)?
@@ -115,7 +115,9 @@ pub async fn delete_profile(
     save_settings(&app, &settings).await?;
 
     let file_delete_error = if delete_files {
-        delete_profile_dir(&app, &profile.server_dir).await.err()
+        delete_profile_dir(&app, &profile.id, &profile.server_dir)
+            .await
+            .err()
     } else {
         None
     };
@@ -156,7 +158,7 @@ pub async fn save_settings(app: &AppHandle, settings: &AppSettings) -> Result<()
     }
     let content = serde_json::to_string_pretty(settings)
         .map_err(|error| format!("앱 설정 직렬화 실패: {error}"))?;
-    fs::write(path, content)
+    write_file_atomic(&path, content.as_bytes())
         .await
         .map_err(|error| format!("settings.json 저장 실패: {error}"))
 }
@@ -174,14 +176,14 @@ fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app_data_dir(app)?.join("settings.json"))
 }
 
-async fn delete_profile_dir(app: &AppHandle, path: &str) -> Result<(), String> {
+async fn delete_profile_dir(app: &AppHandle, profile_id: &str, path: &str) -> Result<(), String> {
     let trimmed = path.trim();
     if trimmed.is_empty() {
         return Err("서버 폴더 경로가 비어 있어 파일 삭제를 건너뛰었습니다.".to_string());
     }
 
     let dir = PathBuf::from(trimmed);
-    ensure_deletable_profile_dir(app, &dir)?;
+    ensure_deletable_profile_dir(app, profile_id, &dir)?;
 
     match fs::symlink_metadata(&dir).await {
         Ok(metadata) if metadata.file_type().is_symlink() => {
@@ -196,12 +198,24 @@ async fn delete_profile_dir(app: &AppHandle, path: &str) -> Result<(), String> {
     }
 }
 
-fn ensure_deletable_profile_dir(app: &AppHandle, dir: &Path) -> Result<(), String> {
+fn ensure_deletable_profile_dir(
+    app: &AppHandle,
+    profile_id: &str,
+    dir: &Path,
+) -> Result<(), String> {
     if !dir.is_absolute() {
         return Err("절대 경로가 아닌 서버 폴더는 삭제하지 않습니다.".to_string());
     }
     if dir.parent().is_none() {
         return Err("파일시스템 루트는 삭제할 수 없습니다.".to_string());
+    }
+
+    let default_dir = default_profile_dir(app, profile_id)?;
+    if !same_path(dir, &default_dir) {
+        return Err(
+            "앱이 생성한 기본 서버 폴더만 자동 삭제할 수 있습니다. 사용자 지정 폴더는 직접 확인 후 삭제해 주세요."
+                .to_string(),
+        );
     }
 
     let app_data = app_data_dir(app)?;
@@ -225,4 +239,13 @@ fn same_path(left: &Path, right: &Path) -> bool {
     let left = left.canonicalize().unwrap_or_else(|_| left.to_path_buf());
     let right = right.canonicalize().unwrap_or_else(|_| right.to_path_buf());
     left == right
+}
+
+fn next_profile_id(settings: &AppSettings) -> String {
+    loop {
+        let id = unique_id("profile");
+        if !settings.profiles.iter().any(|profile| profile.id == id) {
+            return id;
+        }
+    }
 }
