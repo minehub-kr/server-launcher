@@ -20,7 +20,7 @@ use crate::{
 pub const MINECRAFT_MANIFEST_URL: &str =
     "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
 pub const MODRINTH_API: &str = "https://api.modrinth.com/v2";
-pub const PAPER_API: &str = "https://api.papermc.io/v2";
+pub const PAPER_API: &str = "https://fill.papermc.io/v3";
 
 static UNIQUE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -198,10 +198,11 @@ pub fn safe_relative_path(path: &str) -> bool {
 }
 
 pub fn stable_mc_version(version: &str) -> bool {
-    version.starts_with("1.")
-        && version
-            .chars()
-            .all(|character| character.is_ascii_digit() || character == '.')
+    let parts: Vec<_> = version.split('.').collect();
+    parts.len() >= 2
+        && parts.iter().all(|part| {
+            !part.is_empty() && part.chars().all(|character| character.is_ascii_digit())
+        })
 }
 
 pub fn crash_line(line: &str) -> bool {
@@ -431,6 +432,20 @@ mod tests {
         assert!(crash_line(
             "This crash report has been saved to: /server/crash-reports/crash.txt"
         ));
+    }
+
+    #[test]
+    fn stable_mc_version_accepts_numeric_release_versions() {
+        assert!(stable_mc_version("1.21.11"));
+        assert!(stable_mc_version("26.1"));
+        assert!(stable_mc_version("26.1.2"));
+    }
+
+    #[test]
+    fn stable_mc_version_rejects_prereleases_and_snapshots() {
+        assert!(!stable_mc_version("1.21.11-rc3"));
+        assert!(!stable_mc_version("26.2-rc-2"));
+        assert!(!stable_mc_version("25w31a"));
     }
 }
 

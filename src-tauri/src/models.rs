@@ -1,6 +1,9 @@
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeSet, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 use sysinfo::System;
 use tokio::{process::ChildStdin, sync::Mutex};
 
@@ -192,28 +195,24 @@ pub struct MinecraftJavaVersion {
 
 #[derive(Deserialize)]
 pub struct PaperProject {
-    pub versions: Vec<String>,
-}
-
-#[derive(Deserialize)]
-pub struct PaperBuilds {
-    pub builds: Vec<PaperBuild>,
+    pub versions: BTreeMap<String, Vec<String>>,
 }
 
 #[derive(Clone, Deserialize)]
 pub struct PaperBuild {
-    pub build: u32,
-    pub downloads: PaperDownloads,
-}
-
-#[derive(Clone, Deserialize)]
-pub struct PaperDownloads {
-    pub application: PaperFile,
+    pub id: u32,
+    pub downloads: BTreeMap<String, PaperFile>,
 }
 
 #[derive(Clone, Deserialize)]
 pub struct PaperFile {
     pub name: String,
+    pub checksums: PaperChecksums,
+    pub url: String,
+}
+
+#[derive(Clone, Deserialize)]
+pub struct PaperChecksums {
     pub sha256: Option<String>,
 }
 

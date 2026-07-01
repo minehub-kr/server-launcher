@@ -1,8 +1,8 @@
 use crate::{
     java::choose_java,
     models::{
-        AppState, PaperBuild, PaperBuilds, PaperProject, PurpurBuilds, PurpurProject, ServerKind,
-        ServerPlan, ServerProfile, ServerVersion, VersionDetail, VersionManifest,
+        AppState, PaperBuild, PaperProject, PurpurBuilds, PurpurProject, ServerKind, ServerPlan,
+        ServerProfile, ServerVersion, VersionDetail, VersionManifest,
     },
     settings::find_profile,
     system::{
@@ -40,12 +40,15 @@ pub async fn list_server_versions(
             let url = format!("{PAPER_API}/projects/{project}");
             let project: PaperProject =
                 get_json_or(&state.http, &url, UNSUPPORTED_SERVER_VERSION).await?;
-            project
+            let mut versions: Vec<_> = project
                 .versions
                 .into_iter()
-                .rev()
+                .flat_map(|(_, versions)| versions)
                 .filter(|version| stable_mc_version(version))
-                .collect()
+                .collect();
+            versions.sort_by(|a, b| mc_version_key(b).cmp(&mc_version_key(a)));
+            versions.dedup();
+            versions
         }
         ServerKind::Purpur => {
             let project: PurpurProject = get_json_or(
@@ -141,10 +144,13 @@ pub async fn prepare_server_jar(
                 .papermc_project()
                 .ok_or_else(|| "PaperMC 프로젝트 매핑 실패".to_string())?;
             let build = latest_papermc_build(client, project, &profile.minecraft_version).await?;
-            let file_name = build.downloads.application.name;
-            let path = dir.join(&file_name);
+            let download = build
+                .downloads
+                .get("server:default")
+                .ok_or_else(|| format!("{project} 서버 JAR 다운로드를 찾지 못했습니다."))?;
+            let path = dir.join(&download.name);
 
-            if let Some(sha256) = build.downloads.application.sha256.as_deref() {
+            if let Some(sha256) = download.checksums.sha256.as_deref() {
                 if file_matches_sha256(&path, sha256).await {
                     return Ok(path);
                 }
@@ -152,14 +158,10 @@ pub async fn prepare_server_jar(
                 return Ok(path);
             }
 
-            let url = format!(
-                "{PAPER_API}/projects/{project}/versions/{}/builds/{}/downloads/{}",
-                profile.minecraft_version, build.build, file_name
-            );
-            if let Some(sha256) = build.downloads.application.sha256.as_deref() {
-                download_file_with_sha256(client, &url, &path, sha256).await?;
+            if let Some(sha256) = download.checksums.sha256.as_deref() {
+                download_file_with_sha256(client, &download.url, &path, sha256).await?;
             } else {
-                download_file(client, &url, &path).await?;
+                download_file(client, &download.url, &path).await?;
             }
             Ok(path)
         }
@@ -207,7 +209,7 @@ async fn check_server_available(
             match latest_papermc_build(client, project, version).await {
                 Ok(build) => (
                     true,
-                    format!("{} 빌드 {} 다운로드 가능", kind.label(), build.build),
+                    format!("{} 빌드 {} 다운로드 가능", kind.label(), build.id),
                 ),
                 Err(error) => (false, error),
             }
@@ -221,12 +223,18 @@ async fn latest_papermc_build(
     version: &str,
 ) -> Result<PaperBuild, String> {
     let url = format!("{PAPER_API}/projects/{project}/versions/{version}/builds");
-    let builds: PaperBuilds = get_json_or(client, &url, UNSUPPORTED_SERVER_VERSION).await?;
+    let builds: Vec<PaperBuild> = get_json_or(client, &url, UNSUPPORTED_SERVER_VERSION).await?;
     builds
-        .builds
         .into_iter()
-        .max_by_key(|build| build.build)
+        .max_by_key(|build| build.id)
         .ok_or_else(|| format!("선택한 버전의 {project} 빌드가 없습니다."))
+}
+
+fn mc_version_key(version: &str) -> Vec<u32> {
+    version
+        .split('.')
+        .filter_map(|part| part.parse().ok())
+        .collect()
 }
 
 async fn latest_purpur_build(client: &Client, version: &str) -> Result<String, String> {
