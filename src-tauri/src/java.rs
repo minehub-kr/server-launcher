@@ -59,6 +59,33 @@ fn java_candidates() -> Vec<std::path::PathBuf> {
         candidates.extend(env::split_paths(&path_var).map(|path| path.join(executable)));
     }
 
+    #[cfg(target_os = "macos")]
+    {
+        candidates.extend(
+            ["/opt/homebrew/bin", "/usr/local/bin"]
+                .into_iter()
+                .map(|path| Path::new(path).join(executable)),
+        );
+
+        for root in ["/opt/homebrew/opt", "/usr/local/opt"] {
+            if let Ok(entries) = std::fs::read_dir(root) {
+                for entry in entries.flatten() {
+                    let name = entry.file_name();
+                    let name = name.to_string_lossy();
+                    if name.starts_with("openjdk") || name.starts_with("java") {
+                        candidates.push(entry.path().join("bin").join(executable));
+                        candidates.push(
+                            entry
+                                .path()
+                                .join("libexec/openjdk.jdk/Contents/Home/bin")
+                                .join(executable),
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     for root in [
         "/Library/Java/JavaVirtualMachines",
         "/System/Library/Java/JavaVirtualMachines",
