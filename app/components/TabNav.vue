@@ -1,26 +1,29 @@
 <script setup lang="ts">
 import { useLauncher } from '~/composables/useLauncherState'
+import { computed } from 'vue'
 
 const launcher = useLauncher()
+
+const tabs = computed(() =>
+  launcher.tabs.map((tab) => ({
+    ...tab,
+    disabled: tab.value === 'plugins' && !launcher.canUsePlugins,
+    badge:
+      tab.value === 'plugins' && launcher.pluginUpdateCount
+        ? { content: launcher.pluginUpdateCount, color: 'warning', variant: 'soft', size: 'xs' }
+        : undefined
+  }))
+)
 </script>
 
 <template>
-  <nav class="flex flex-wrap gap-2 border-b border-default px-5 py-4">
-    <UButton
-      v-for="tab in launcher.tabs"
-      :key="tab.value"
-      :icon="tab.icon"
-      :color="launcher.mainTab === tab.value ? 'primary' : 'neutral'"
-      :variant="launcher.mainTab === tab.value ? 'solid' : 'subtle'"
-      :disabled="tab.value === 'plugins' && !launcher.canUsePlugins"
-      @click="launcher.mainTab = tab.value"
-    >
-      <span class="inline-flex items-center gap-2">
-        <span>{{ tab.label }}</span>
-        <UBadge v-if="tab.value === 'plugins' && launcher.pluginUpdateCount" size="xs" color="warning" variant="soft">
-          {{ launcher.pluginUpdateCount }}
-        </UBadge>
-      </span>
-    </UButton>
+  <nav class="border-b border-default px-5 py-4">
+    <UTabs
+      v-model="launcher.mainTab"
+      :content="false"
+      :items="tabs"
+      variant="link"
+      class="w-full"
+    />
   </nav>
 </template>
