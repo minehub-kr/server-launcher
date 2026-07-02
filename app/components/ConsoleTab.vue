@@ -39,7 +39,7 @@ const scrollToBottom = async () => {
 }
 
 watch(
-  () => [launcher.filteredLogs.length, launcher.status.currentProfileId, launcher.logQuery],
+  () => [launcher.filteredLogs.length, launcher.selectedProfileId, launcher.status.currentProfileId, launcher.logQuery],
   scrollToBottom,
   { flush: 'post', immediate: true }
 )

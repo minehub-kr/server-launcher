@@ -56,6 +56,7 @@ export const useLauncherState = () => {
   const javaVersions = ref<JavaRuntime[]>([])
   const plan = ref<ServerPlan | null>(null)
   const status = ref<ServerStatus>(mockStatus())
+  const profileLogs = ref<Record<string, string[]>>({})
   const eula = ref<EulaStatus | null>(null)
   const eulaDialogOpen = ref(false)
   const eulaAgreementChecked = ref(false)
@@ -102,6 +103,7 @@ export const useLauncherState = () => {
   const appUpdateProgress = ref(0)
   const appUpdateProgressLabel = ref('')
   const appUpdateInstalling = ref(false)
+  const emptyLogLine = '서버 로그가 여기에 표시됩니다.'
 
   let pollTimer: ReturnType<typeof setInterval> | undefined
   let networkTimer: ReturnType<typeof setInterval> | undefined
@@ -110,6 +112,7 @@ export const useLauncherState = () => {
   let versionRequestId = 0
   let createVersionRequestId = 0
   let appUpdateDownloadedBytes = 0
+  let runtimeLogProfileId = ''
 
   const selectedProfile = computed(() => profiles.value.find((profile) => profile.id === selectedProfileId.value) || null)
   const needsOnboarding = computed(() => profilesLoaded.value && profiles.value.length === 0)
@@ -118,9 +121,13 @@ export const useLauncherState = () => {
   const canUsePlugins = computed(() => !!selectedProfile.value && selectedProfile.value.kind !== 'vanilla')
   const pluginUpdateCount = computed(() => pluginUpdateSummary.value?.updatable || 0)
   const hasPluginUpdates = computed(() => pluginUpdateCount.value > 0)
+  const selectedProfileLogs = computed(() => {
+    const logs = selectedProfileId.value ? profileLogs.value[selectedProfileId.value] : []
+    return logs?.length ? logs : [emptyLogLine]
+  })
   const filteredLogs = computed(() => {
     const query = logQuery.value.trim().toLowerCase()
-    return status.value.logs.filter((line) => !query || stripConsoleCodes(line).toLowerCase().includes(query))
+    return selectedProfileLogs.value.filter((line) => !query || stripConsoleCodes(line).toLowerCase().includes(query))
   })
   const versionOptions = computed(() => versions.value.map((version) => ({ label: version.id, value: version.id })))
   const createVersionOptions = computed(() => createVersions.value.map((version) => ({ label: version.id, value: version.id })))
@@ -160,14 +167,32 @@ export const useLauncherState = () => {
     notifyError('작업 실패', friendlyError(error))
   }
 
+  const updateProfileLogs = (profileId: string, logs: string[]) => {
+    profileLogs.value = {
+      ...profileLogs.value,
+      [profileId]: logs.slice(-1000)
+    }
+  }
+
   const pushRuntimeLog = (line: string) => {
-    if (status.value.logs.at(-1) !== line) status.value.logs.push(line)
-    if (status.value.logs.length > 1000) status.value.logs.splice(0, status.value.logs.length - 1000)
+    const profileId = status.value.currentProfileId || runtimeLogProfileId
+    if (!profileId) return
+    const logs = profileLogs.value[profileId] || []
+    if (logs.at(-1) === line) return
+    const nextLogs = [...logs, line]
+    updateProfileLogs(profileId, nextLogs)
+    if (status.value.currentProfileId === profileId) {
+      status.value = { ...status.value, logs: nextLogs.slice(-1000) }
+    }
   }
 
   const applyStatus = (next: ServerStatus) => {
-    const sameRuntime = next.currentProfileId === status.value.currentProfileId && next.status === status.value.status
-    const logs = sameRuntime && status.value.logs.length >= next.logs.length ? [...status.value.logs] : [...next.logs]
+    const profileId = next.currentProfileId || status.value.currentProfileId || runtimeLogProfileId
+    const previousLogs = profileId ? profileLogs.value[profileId] || [] : status.value.logs
+    const sameRuntime = profileId && profileId === status.value.currentProfileId && next.status === status.value.status
+    const logs = sameRuntime && previousLogs.length >= next.logs.length ? [...previousLogs] : [...next.logs]
+    if (profileId) updateProfileLogs(profileId, logs)
+    runtimeLogProfileId = next.running || next.currentProfileId ? profileId || '' : ''
     status.value = { ...next, logs }
   }
 
@@ -424,6 +449,7 @@ export const useLauncherState = () => {
 
   const startSelectedServer = async () => {
     if (!selectedProfile.value) return
+    runtimeLogProfileId = selectedProfile.value.id
     applyStatus(await call<ServerStatus>('start_server', { profileId: selectedProfile.value.id }))
     await refreshProfileData()
   }
