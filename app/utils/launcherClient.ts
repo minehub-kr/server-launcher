@@ -5,9 +5,12 @@ import {
   emptyAccessLists,
   mockStatus,
   type AccessLists,
+  type PluginFile,
+  type PluginUpdateSummary,
   type ServerKind,
   type ServerProfile,
-  type ServerVersion
+  type ServerVersion,
+  type UpdatedPlugin
 } from '~/types/launcher'
 
 const mockVersions: Record<ServerKind, ServerVersion[]> = {
@@ -18,6 +21,22 @@ const mockVersions: Record<ServerKind, ServerVersion[]> = {
 }
 
 const mockProfiles: ServerProfile[] = []
+let mockPlugins: PluginFile[] = [
+  {
+    filename: 'LuckPerms-Bukkit-5.4.145.jar',
+    displayName: 'LuckPerms-Bukkit-5.4.145',
+    enabled: true,
+    size: 1520432,
+    update: null
+  },
+  {
+    filename: 'Vault.jar.disabled',
+    displayName: 'Vault',
+    enabled: false,
+    size: 389120,
+    update: null
+  }
+]
 let mockAccess = emptyAccessLists()
 let mockRuntimeStatus = mockStatus()
 const mockAcceptedEula = new Set<string>()
@@ -180,8 +199,72 @@ export const launcherCall = async <T,>(command: string, args?: Record<string, un
       sampledAt: Math.floor(Date.now() / 1000)
     } as T
   }
-  if (command === 'list_plugins' || command === 'search_modrinth') return [] as T
-  if (command === 'set_plugin_enabled') return [] as T
+  if (command === 'list_plugins') return mockPlugins as T
+  if (command === 'search_modrinth') return [] as T
+  if (command === 'check_plugin_updates') {
+    mockPlugins = mockPlugins.map((plugin, index) => ({
+      ...plugin,
+      update: index === 0 && plugin.filename.includes('LuckPerms')
+        ? {
+            available: !plugin.filename.includes('5.4.160'),
+            currentHash: 'mock-current-sha1',
+            projectId: 'mock-project',
+            currentVersionId: plugin.filename.includes('5.4.160') ? 'mock-version' : null,
+            currentVersion: plugin.filename.includes('5.4.160') ? '5.4.160' : null,
+            latestVersionId: 'mock-version',
+            latestVersion: '5.4.160',
+            latestFilename: 'LuckPerms-Bukkit-5.4.160.jar',
+            latestSize: 1580000,
+            datePublished: new Date().toISOString(),
+            note: null
+          }
+        : null
+    }))
+    const updatable = mockPlugins.filter((plugin) => plugin.update?.available).length
+    const summary: PluginUpdateSummary = {
+      checkedAt: Math.floor(Date.now() / 1000),
+      total: mockPlugins.length,
+      updatable,
+      unsupported: mockPlugins.filter((plugin) => !plugin.update).length,
+      plugins: mockPlugins
+    }
+    return summary as T
+  }
+  if (command === 'install_plugin_update') {
+    const filename = String(args?.filename || '')
+    const index = mockPlugins.findIndex((plugin) => plugin.filename === filename)
+    const updated: UpdatedPlugin = {
+      filename: 'LuckPerms-Bukkit-5.4.160.jar',
+      displayName: 'LuckPerms-Bukkit-5.4.160',
+      version: '5.4.160',
+      backupPath: '/Users/example/Minecraft Servers/New Server/plugins/.minehub-backups/LuckPerms-1780000000.jar',
+      path: '/Users/example/Minecraft Servers/New Server/plugins/LuckPerms-Bukkit-5.4.160.jar'
+    }
+    if (index >= 0) {
+      const plugin = mockPlugins[index]
+      mockPlugins[index] = {
+        filename: updated.filename,
+        displayName: updated.displayName,
+        enabled: plugin?.enabled ?? true,
+        size: 1580000,
+        update: null
+      }
+    }
+    return updated as T
+  }
+  if (command === 'set_plugin_enabled') {
+    const filename = String(args?.filename || '')
+    const enabled = args?.enabled === true
+    mockPlugins = mockPlugins.map((plugin) => plugin.filename === filename
+      ? {
+          ...plugin,
+          filename: enabled ? plugin.filename.replace(/\.disabled$/, '') : `${plugin.filename}.disabled`,
+          enabled,
+          update: null
+        }
+      : plugin)
+    return mockPlugins as T
+  }
   if (command === 'install_modrinth_plugin') return { filename: 'plugin.jar' } as T
   if (command === 'create_backup') return { filename: 'backup.zip', path: '/tmp/backup.zip', size: 0 } as T
   if (command === 'open_server_path') return undefined as T

@@ -412,13 +412,40 @@ pub struct MojangProfile {
     pub name: String,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginFile {
     pub filename: String,
     pub display_name: String,
     pub enabled: bool,
     pub size: u64,
+    pub update: Option<PluginUpdateInfo>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginUpdateInfo {
+    pub available: bool,
+    pub current_hash: String,
+    pub project_id: String,
+    pub current_version_id: Option<String>,
+    pub current_version: Option<String>,
+    pub latest_version_id: String,
+    pub latest_version: String,
+    pub latest_filename: String,
+    pub latest_size: u64,
+    pub date_published: Option<String>,
+    pub note: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginUpdateSummary {
+    pub checked_at: u64,
+    pub total: usize,
+    pub updatable: usize,
+    pub unsupported: usize,
+    pub plugins: Vec<PluginFile>,
 }
 
 #[derive(Deserialize)]
@@ -438,10 +465,16 @@ pub struct ModrinthProject {
     pub versions: Vec<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
+#[allow(dead_code)]
 pub struct ModrinthVersion {
+    pub id: String,
+    pub project_id: String,
     pub version_number: String,
     pub version_type: String,
+    pub date_published: Option<String>,
+    pub game_versions: Vec<String>,
+    pub loaders: Vec<String>,
     pub files: Vec<ModrinthFile>,
 }
 
@@ -450,6 +483,7 @@ pub struct ModrinthFile {
     pub url: String,
     pub filename: String,
     pub primary: bool,
+    pub size: Option<u64>,
     pub hashes: Option<ModrinthHashes>,
 }
 
@@ -464,6 +498,16 @@ pub struct InstalledPlugin {
     pub title: String,
     pub version: String,
     pub filename: String,
+    pub path: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdatedPlugin {
+    pub filename: String,
+    pub display_name: String,
+    pub version: String,
+    pub backup_path: String,
     pub path: String,
 }
 

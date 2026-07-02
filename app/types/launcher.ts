@@ -183,6 +183,29 @@ export type PluginFile = {
   displayName: string
   enabled: boolean
   size: number
+  update: PluginUpdateInfo | null
+}
+
+export type PluginUpdateInfo = {
+  available: boolean
+  currentHash: string
+  projectId: string
+  currentVersionId: string | null
+  currentVersion: string | null
+  latestVersionId: string
+  latestVersion: string
+  latestFilename: string
+  latestSize: number
+  datePublished: string | null
+  note: string | null
+}
+
+export type PluginUpdateSummary = {
+  checkedAt: number
+  total: number
+  updatable: number
+  unsupported: number
+  plugins: PluginFile[]
 }
 
 export type ModrinthProject = {
@@ -200,6 +223,14 @@ export type InstalledPlugin = {
   title: string
   version: string
   filename: string
+  path: string
+}
+
+export type UpdatedPlugin = {
+  filename: string
+  displayName: string
+  version: string
+  backupPath: string
   path: string
 }
 

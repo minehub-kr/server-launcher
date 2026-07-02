@@ -16,6 +16,7 @@ const launcher = useLauncher()
         <UBadge v-if="launcher.plan && !launcher.plan.serverAvailable" color="error" variant="soft">지원 안 됨</UBadge>
         <UBadge v-if="launcher.plan && !launcher.plan.java" color="warning" variant="soft">Java 필요</UBadge>
         <UBadge v-if="launcher.config?.restartRequired" color="warning" variant="soft">재시작 필요</UBadge>
+        <UBadge v-if="launcher.pluginUpdateCount" color="warning" variant="soft">플러그인 업데이트 {{ launcher.pluginUpdateCount }}</UBadge>
       </div>
       <p class="mt-1 truncate text-sm text-muted">{{ launcher.selectedProfile?.serverDir || launcher.status.dataDir }}</p>
     </div>

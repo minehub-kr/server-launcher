@@ -135,6 +135,13 @@ pub async fn file_matches_sha1(path: &Path, expected: &str) -> bool {
     sha1_matches(&bytes, expected)
 }
 
+pub async fn file_sha1(path: &Path) -> Result<String, String> {
+    let bytes = fs::read(path)
+        .await
+        .map_err(|error| format!("플러그인 해시 계산 실패: {error}"))?;
+    Ok(sha1_digest(&bytes))
+}
+
 pub async fn file_matches_sha256(path: &Path, expected: &str) -> bool {
     let Ok(bytes) = fs::read(path).await else {
         return false;
@@ -149,9 +156,13 @@ pub async fn file_nonempty(path: &Path) -> bool {
 }
 
 fn sha1_matches(bytes: &[u8], expected: &str) -> bool {
+    sha1_digest(bytes).eq_ignore_ascii_case(expected)
+}
+
+fn sha1_digest(bytes: &[u8]) -> String {
     let mut hasher = Sha1::new();
     hasher.update(bytes);
-    format!("{:x}", hasher.finalize()).eq_ignore_ascii_case(expected)
+    format!("{:x}", hasher.finalize())
 }
 
 fn sha256_matches(bytes: &[u8], expected: &str) -> bool {
@@ -446,6 +457,22 @@ mod tests {
         assert!(!stable_mc_version("1.21.11-rc3"));
         assert!(!stable_mc_version("26.2-rc-2"));
         assert!(!stable_mc_version("25w31a"));
+    }
+
+    #[test]
+    fn safe_filename_keeps_only_file_name() {
+        assert_eq!(safe_filename("../../plugin.jar").unwrap(), "plugin.jar");
+    }
+
+    #[tokio::test]
+    async fn file_sha1_hashes_file_content() {
+        let path = std::env::temp_dir().join(format!("minehub-sha1-{}.txt", unique_suffix()));
+        tokio::fs::write(&path, b"minehub").await.unwrap();
+        assert_eq!(
+            file_sha1(&path).await.unwrap(),
+            "cce6574b98809dd069f87f4bdebfba0c7caead62"
+        );
+        tokio::fs::remove_file(path).await.unwrap();
     }
 }
 

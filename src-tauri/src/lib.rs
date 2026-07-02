@@ -39,6 +39,8 @@ pub fn run() {
             plugins::install_modrinth_plugin,
             plugins::list_plugins,
             plugins::set_plugin_enabled,
+            plugins::check_plugin_updates,
+            plugins::install_plugin_update,
             backup::create_backup,
             system::open_server_path,
             system::network_diagnostics,

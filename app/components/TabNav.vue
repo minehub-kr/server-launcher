@@ -15,7 +15,12 @@ const launcher = useLauncher()
       :disabled="tab.value === 'plugins' && !launcher.canUsePlugins"
       @click="launcher.mainTab = tab.value"
     >
-      {{ tab.label }}
+      <span class="inline-flex items-center gap-2">
+        <span>{{ tab.label }}</span>
+        <UBadge v-if="tab.value === 'plugins' && launcher.pluginUpdateCount" size="xs" color="warning" variant="soft">
+          {{ launcher.pluginUpdateCount }}
+        </UBadge>
+      </span>
     </UButton>
   </nav>
 </template>

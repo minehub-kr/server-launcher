@@ -1,32 +1,90 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useLauncher } from '~/composables/useLauncherState'
 
 const launcher = useLauncher()
+const updateCheckedLabel = computed(() => launcher.pluginUpdateSummary?.checkedAt
+  ? new Date(launcher.pluginUpdateSummary.checkedAt * 1000).toLocaleTimeString('ko-KR', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    })
+  : '확인 전')
+const fileSize = (size: number) => `${(size / 1024 / 1024).toFixed(2)} MB`
 </script>
 
 <template>
   <section class="grid gap-4 xl:grid-cols-[420px_minmax(0,1fr)]">
     <div class="panel p-4">
-      <div class="mb-3 flex items-center justify-between">
+      <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div class="min-w-0">
           <div class="flex flex-wrap items-center gap-2">
             <h3 class="text-sm font-semibold text-highlighted">설치된 플러그인</h3>
             <UBadge color="warning" variant="soft">재시작 필요</UBadge>
+            <UBadge v-if="launcher.pluginUpdateCount" color="warning" variant="soft">업데이트 {{ launcher.pluginUpdateCount }}</UBadge>
           </div>
-          <p class="mt-1 text-xs text-muted">설치/활성화/비활성화 변경은 서버 재시작 후 적용됩니다.</p>
+          <p class="mt-1 text-xs text-muted">
+            설치/활성화/비활성화 변경은 서버 재시작 후 적용됩니다. 업데이트 확인: {{ updateCheckedLabel }}
+          </p>
         </div>
-        <UButton size="sm" color="neutral" variant="subtle" icon="i-lucide-folder-open" @click="launcher.openPath('plugins')">폴더</UButton>
+        <div class="flex shrink-0 items-center gap-2">
+          <UButton
+            size="sm"
+            color="neutral"
+            variant="subtle"
+            icon="i-lucide-refresh-cw"
+            :loading="launcher.loading === 'plugin-updates'"
+            @click="launcher.checkPluginUpdates"
+          >
+            업데이트 확인
+          </UButton>
+          <UButton size="sm" color="neutral" variant="subtle" icon="i-lucide-folder-open" @click="launcher.openPath('plugins')">폴더</UButton>
+        </div>
       </div>
+
+      <UAlert
+        v-if="launcher.hasPluginUpdates"
+        class="mb-3"
+        color="warning"
+        variant="soft"
+        icon="i-lucide-package-check"
+        title="플러그인 업데이트가 있습니다."
+        description="서버를 중지한 뒤 개별 플러그인을 업데이트할 수 있습니다."
+      />
+
       <div class="space-y-2">
         <div v-for="plugin in launcher.plugins" :key="plugin.filename" class="plugin-row">
-          <span class="min-w-0">
-            <span class="block truncate text-sm font-medium">{{ plugin.displayName }}</span>
-            <span class="text-xs text-muted">{{ (plugin.size / 1024 / 1024).toFixed(2) }} MB</span>
-          </span>
-          <div class="flex shrink-0 items-center gap-2">
-            <UBadge :color="plugin.enabled ? 'success' : 'neutral'" variant="subtle">
-              {{ plugin.enabled ? '활성화됨' : '비활성화됨' }}
-            </UBadge>
+          <div class="min-w-0 flex-1">
+            <div class="flex min-w-0 flex-wrap items-center gap-2">
+              <span class="truncate text-sm font-medium">{{ plugin.displayName }}</span>
+              <UBadge :color="plugin.enabled ? 'success' : 'neutral'" variant="subtle">
+                {{ plugin.enabled ? '활성화됨' : '비활성화됨' }}
+              </UBadge>
+              <UBadge v-if="plugin.update?.available" color="warning" variant="soft">업데이트 가능</UBadge>
+              <UBadge v-else-if="plugin.update" color="success" variant="soft">최신</UBadge>
+            </div>
+            <p class="mt-1 truncate text-xs text-muted">{{ plugin.filename }} · {{ fileSize(plugin.size) }}</p>
+            <p v-if="plugin.update?.available" class="mt-1 text-xs text-muted">
+              현재: {{ plugin.update.currentVersion || '알 수 없음' }} · 최신: {{ plugin.update.latestVersion }}
+            </p>
+            <p v-if="launcher.activeProfileRunning && plugin.update?.available" class="mt-1 text-xs text-muted">
+              서버를 중지한 뒤 업데이트할 수 있습니다.
+            </p>
+          </div>
+          <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
+            <UButton
+              v-if="plugin.update?.available"
+              size="sm"
+              color="warning"
+              variant="soft"
+              icon="i-lucide-download"
+              :disabled="launcher.activeProfileRunning"
+              :loading="launcher.loading === `plugin-update-${plugin.filename}`"
+              @click="launcher.installPluginUpdate(plugin)"
+            >
+              업데이트
+            </UButton>
             <UButton
               size="sm"
               :color="plugin.enabled ? 'warning' : 'success'"

@@ -29,6 +29,7 @@ import {
   type NetworkDiagnostics,
   type PlayerAction,
   type PluginFile,
+  type PluginUpdateSummary,
   type ServerConfigBundle,
   type ServerKind,
   type ServerLogEvent,
@@ -38,6 +39,7 @@ import {
   type ServerVersion,
   type SystemMetrics,
   type ThemeMode,
+  type UpdatedPlugin,
   type UpdateProgressEvent,
   type UpnpMappingResult
 } from '~/types/launcher'
@@ -65,6 +67,7 @@ export const useLauncherState = () => {
   const accessLists = ref<AccessLists>(emptyAccessLists())
   const plugins = ref<PluginFile[]>([])
   const modrinthProjects = ref<ModrinthProject[]>([])
+  const pluginUpdateSummary = ref<PluginUpdateSummary | null>(null)
   const mainTab = ref<MainTab>('console')
   const appSettingsOpen = ref(false)
   const newProfileOpen = ref(false)
@@ -113,6 +116,8 @@ export const useLauncherState = () => {
   const activeProfileRunning = computed(() => status.value.running && status.value.currentProfileId === selectedProfileId.value)
   const anyServerRunning = computed(() => status.value.running)
   const canUsePlugins = computed(() => !!selectedProfile.value && selectedProfile.value.kind !== 'vanilla')
+  const pluginUpdateCount = computed(() => pluginUpdateSummary.value?.updatable || 0)
+  const hasPluginUpdates = computed(() => pluginUpdateCount.value > 0)
   const filteredLogs = computed(() => {
     const query = logQuery.value.trim().toLowerCase()
     return status.value.logs.filter((line) => !query || stripConsoleCodes(line).toLowerCase().includes(query))
@@ -297,6 +302,7 @@ export const useLauncherState = () => {
     if (!profile || profile.kind === 'vanilla') {
       plugins.value = []
       modrinthProjects.value = []
+      pluginUpdateSummary.value = null
       return
     }
     plugins.value = await call<PluginFile[]>('list_plugins', { profileId: profile.id })
@@ -311,6 +317,7 @@ export const useLauncherState = () => {
       closeEulaDialog()
       network.value = null
       plugins.value = []
+      pluginUpdateSummary.value = null
       accessLists.value = emptyAccessLists()
       return
     }
@@ -318,6 +325,7 @@ export const useLauncherState = () => {
     profileDraft.value = cloneProfile(profile)
     await loadVersions(profile.kind)
     await Promise.all([refreshPlan(), refreshConfig(), refreshAccessLists(), refreshPlugins()])
+    checkPluginUpdates().catch(() => {})
     refreshEulaStatus().catch(() => { eula.value = null })
     loadNetworkDiagnostics().catch(() => { network.value = null })
   }
@@ -517,6 +525,24 @@ export const useLauncherState = () => {
     })
   })
 
+  const checkPluginUpdates = async () => runTask('plugin-updates', async () => {
+    if (!selectedProfile.value || selectedProfile.value.kind === 'vanilla') {
+      pluginUpdateSummary.value = null
+      return
+    }
+
+    pluginUpdateSummary.value = await call<PluginUpdateSummary>('check_plugin_updates', {
+      profileId: selectedProfile.value.id
+    })
+    plugins.value = pluginUpdateSummary.value.plugins
+    if (pluginUpdateSummary.value.updatable > 0) {
+      notifyWarning(
+        '플러그인 업데이트가 있습니다.',
+        `${pluginUpdateSummary.value.updatable}개 플러그인을 업데이트할 수 있습니다.`
+      )
+    }
+  })
+
   const installPlugin = async (project: ModrinthProject) => runTask(`install-${project.project_id}`, async () => {
     if (!selectedProfile.value) return
     const installed = await call<InstalledPlugin>('install_modrinth_plugin', {
@@ -527,6 +553,7 @@ export const useLauncherState = () => {
     })
     notifySuccess('플러그인을 설치했습니다.', `${installed.filename} - 서버 재시작 후 로드됩니다.`)
     await refreshPlugins()
+    await checkPluginUpdates()
   })
 
   const setPluginEnabled = async (plugin: PluginFile, enabled: boolean) => runTask(`plugin-${plugin.filename}`, async () => {
@@ -540,6 +567,18 @@ export const useLauncherState = () => {
       enabled ? '플러그인을 활성화했습니다.' : '플러그인을 비활성화했습니다.',
       '서버 재시작 후 적용됩니다.'
     )
+    await checkPluginUpdates()
+  })
+
+  const installPluginUpdate = async (plugin: PluginFile) => runTask(`plugin-update-${plugin.filename}`, async () => {
+    if (!selectedProfile.value) return
+    const updated = await call<UpdatedPlugin>('install_plugin_update', {
+      profileId: selectedProfile.value.id,
+      filename: plugin.filename
+    })
+    notifySuccess('플러그인을 업데이트했습니다.', `${updated.displayName} ${updated.version}`)
+    await refreshPlugins()
+    await checkPluginUpdates()
   })
 
   const accessPayload = () => ({
@@ -765,6 +804,7 @@ export const useLauncherState = () => {
     accessLists,
     plugins,
     modrinthProjects,
+    pluginUpdateSummary,
     mainTab,
     appSettingsOpen,
     newProfileOpen,
@@ -797,6 +837,8 @@ export const useLauncherState = () => {
     activeProfileRunning,
     anyServerRunning,
     canUsePlugins,
+    pluginUpdateCount,
+    hasPluginUpdates,
     filteredLogs,
     versionOptions,
     createVersionOptions,
@@ -842,8 +884,10 @@ export const useLauncherState = () => {
     closePlayerAction,
     runPlayerAction,
     searchPlugins,
+    checkPluginUpdates,
     installPlugin,
     setPluginEnabled,
+    installPluginUpdate,
     addAccessEntry,
     removeAccessEntry,
     saveAccessLists,
